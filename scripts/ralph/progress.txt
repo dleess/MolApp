@@ -154,3 +154,12 @@
   - Clear `lociHighlights` and `lociSelects` before new structure loads so stale selected loci do not survive a data replacement.
   - Browser verification can deterministically trigger `plugin.behaviors.interaction.click.next(...)` with a real `StructureElement.Loci` rather than relying on coordinate clicks.
 ---
+## 2026-04-30 21:59:09 KST - US-013
+- Documented Apple Pencil support as a follow-up release candidate, not an MVP requirement.
+- Captured future Pencil hover residue tooltip, distance and angle measurement, and screenshot annotation and sharing capabilities.
+- Files changed: `README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' test CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: not applicable; US-013 is documentation-only and does not change UI behavior.
+- **Learnings for future iterations:**
+  - Apple Pencil hover, measurement, annotation, and sharing remain follow-up scope and should not block MVP completion.
+---
