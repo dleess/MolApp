@@ -3,6 +3,7 @@
 - Keep `MoleculeViewerView` viewport-first: the primary viewer should be the back layer in a full-screen `ZStack`, with controls added as overlays instead of sidebars that resize the viewport.
 - Bundled WKWebView assets should be added to the Xcode target resources and loaded with `loadFileURL(_:allowingReadAccessTo:)`; Xcode copies `MolApp/Resources/viewer.html` into the app bundle root as `viewer.html`.
 - Mol* assets are copied as a `MolApp/Resources/molstar` folder resource, so `viewer.html` should load them with bundle-root-relative paths like `molstar/molstar.js` and `molstar/molstar.css`.
+- `MolAppTests` is an XCTest target wired into the shared `MolApp` scheme; use `xcodebuild ... test CODE_SIGNING_ALLOWED=NO` for test verification when app code has test coverage.
 
 ## 2026-04-30 17:04:18 KST - US-001
 - Implemented a minimal native iPadOS SwiftUI scaffold named MolApp.
@@ -47,4 +48,16 @@
   - Keep Mol* debug/status UI outside `#molstar-host`; `Viewer.create` replaces host contents during startup.
   - `viewportBackgroundColor` should be passed as a CSS color string such as `#0b0f14`; passing a numeric color triggered `e.toLowerCase is not a function` in Mol* 5.8.0.
   - Playwright browser installation was blocked by a local certificate chain issue, but using the installed `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` executable with a temporary Playwright package worked for local file verification.
+---
+## 2026-04-30 17:22:46 KST - US-005
+- Implemented a Swift-to-JavaScript bridge with JSON-encoded command envelopes for `loadLocalStructure`, `loadPdbId`, `setRepresentation`, `toggleVisibility`, `focusSelection`, `setSelection`, and `clearSelection`.
+- Added a Mol* viewer-side command dispatcher that reports structured success and failure messages back through the WKWebView script message handler, including non-crashing unknown-command failures.
+- Added an XCTest target and focused bridge decoding tests so the shared scheme now has a real test action.
+- Files changed: `MolApp/MolStarBridge.swift`, `MolApp/MolStarWebView.swift`, `MolApp/MoleculeViewerView.swift`, `MolApp/Resources/viewer.html`, `MolAppTests/MolStarBridgeTests.swift`, `MolApp.xcodeproj/project.pbxproj`, `MolApp.xcodeproj/xcshareddata/xcschemes/MolApp.xcscheme`, `AGENTS.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' build CODE_SIGNING_ALLOWED=NO` passed; `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' test CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: temporary Playwright with system Google Chrome opened `MolApp/Resources/viewer.html`; `document.documentElement.dataset.viewerState` reached `ready`, an unknown command returned a structured failure, and `toggleVisibility` returned success without console or page errors.
+- **Learnings for future iterations:**
+  - Send native viewer commands as one JSON envelope to `window.molapp.handleNativeCommand(...)`; do not interpolate command payload fields into JavaScript snippets.
+  - JavaScript command responses should post `{ id, command, success, error }` through `window.webkit.messageHandlers.molapp`.
+  - Mol* command handlers can start as bridge-safe no-ops for future UI stories, but they should still return structured success or failure so native controls can surface errors consistently.
 ---

@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct MoleculeViewerView: View {
+    @StateObject private var bridge = MolStarBridge()
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             viewport
@@ -21,7 +23,7 @@ struct MoleculeViewerView: View {
     }
 
     private var viewport: some View {
-        MolStarWebView()
+        MolStarWebView(bridge: bridge)
             .ignoresSafeArea()
     }
 }

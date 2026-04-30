@@ -3,15 +3,22 @@ import WebKit
 
 struct MolStarWebView: UIViewRepresentable {
     let htmlResourceName: String
+    @ObservedObject var bridge: MolStarBridge
 
-    init(htmlResourceName: String = "viewer") {
+    init(htmlResourceName: String = "viewer", bridge: MolStarBridge) {
         self.htmlResourceName = htmlResourceName
+        self.bridge = bridge
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(bridge: bridge)
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        configuration.userContentController.add(context.coordinator, name: "molapp")
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.isOpaque = false
@@ -20,6 +27,7 @@ struct MolStarWebView: UIViewRepresentable {
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.allowsBackForwardNavigationGestures = false
+        bridge.attach(webView: webView)
         loadViewerHTML(in: webView)
         return webView
     }
@@ -45,5 +53,21 @@ struct MolStarWebView: UIViewRepresentable {
         }
 
         webView.loadFileURL(htmlURL, allowingReadAccessTo: htmlURL.deletingLastPathComponent())
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "molapp")
+    }
+
+    final class Coordinator: NSObject, WKScriptMessageHandler {
+        private let bridge: MolStarBridge
+
+        init(bridge: MolStarBridge) {
+            self.bridge = bridge
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            bridge.userContentController(userContentController, didReceive: message)
+        }
     }
 }

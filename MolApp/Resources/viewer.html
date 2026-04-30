@@ -71,12 +71,79 @@
 
       function showError(error) {
         const message = error && error.message ? error.message : String(error);
-        window.molapp = { error: message };
+        window.molapp = { error: message, handleNativeCommand };
         document.documentElement.dataset.viewerState = 'error';
         status.classList.add('viewer-status--error');
         status.hidden = false;
         statusMessage.textContent = 'Mol* initialization failed: ' + message;
       }
+
+      function postCommandResult(result) {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
+          window.webkit.messageHandlers.molapp.postMessage(result);
+        }
+      }
+
+      async function handleNativeCommand(envelope) {
+        const id = envelope && envelope.id ? envelope.id : '';
+        const command = envelope && envelope.command ? envelope.command : '';
+
+        try {
+          if (!window.molapp || !window.molapp.viewer) {
+            throw new Error('Mol* viewer is not ready.');
+          }
+
+          const payload = envelope.payload || {};
+          const handler = commandHandlers[command];
+          if (!handler) {
+            throw new Error('Unknown MolApp command: ' + command);
+          }
+
+          await handler(payload);
+          postCommandResult({ id, command, success: true });
+        } catch (error) {
+          const message = error && error.message ? error.message : String(error);
+          postCommandResult({ id, command, success: false, error: message });
+        }
+      }
+
+      const commandHandlers = {
+        loadLocalStructure: async function (payload) {
+          if (!payload.data || !payload.format) {
+            throw new Error('loadLocalStructure requires data and format.');
+          }
+
+          await window.molapp.viewer.loadStructureFromData(payload.data, payload.format, {
+            dataLabel: payload.label || 'Local structure'
+          });
+        },
+        loadPdbId: async function (payload) {
+          const pdbId = String(payload.pdbId || '').trim();
+          if (!/^[A-Za-z0-9]{4}$/.test(pdbId)) {
+            throw new Error('loadPdbId requires a 4-character PDB ID.');
+          }
+
+          await window.molapp.viewer.loadPdb(pdbId.toUpperCase());
+        },
+        setRepresentation: async function (payload) {
+          window.molapp.representation = payload.representation || null;
+        },
+        toggleVisibility: async function (payload) {
+          window.molapp.visibility[payload.feature] = Boolean(payload.isVisible);
+        },
+        focusSelection: async function () {
+          const canvas = window.molapp.viewer.plugin.canvas3d;
+          if (canvas) {
+            canvas.requestCameraReset({ durationMs: 250 });
+          }
+        },
+        setSelection: async function (payload) {
+          window.molapp.selection = payload;
+        },
+        clearSelection: async function () {
+          window.molapp.selection = null;
+        }
+      };
 
       window.addEventListener('error', function (event) {
         showError(event.error || event.message);
@@ -108,7 +175,13 @@
           viewportBackgroundColor: '#0b0f14'
         });
 
-        window.molapp = { viewer };
+        window.molapp = {
+          viewer,
+          handleNativeCommand,
+          representation: null,
+          visibility: {},
+          selection: null
+        };
         document.documentElement.dataset.viewerState = 'ready';
         status.hidden = true;
       }
