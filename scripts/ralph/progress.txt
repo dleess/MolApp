@@ -9,6 +9,7 @@
 - Keep iPad camera gestures owned by Mol*/`viewer.html`: disable WKWebView scroll and pinch interception, keep `#molstar-host` at `touch-action: none`, and add custom gesture behavior only when Mol* does not already provide it.
 - Native viewport controls belong in `MoleculeViewerView` overlays and should call `MolStarBridge` commands directly; representation choices use `MoleculeRepresentation` raw values routed through `setRepresentation`.
 - Structural visibility feature keys belong in `MoleculeVisibilityFeature` and should be routed through `MolStarBridge.toggleVisibility` from native overlay controls.
+- Selection details flow through `MolStarBridge.currentSelection` using viewer-side `selectionChanged` messages; Mol* click loci can be converted with `StructureElement.Loci.getFirstLocation` and `StructureProperties`.
 
 ## 2026-04-30 17:04:18 KST - US-001
 - Implemented a minimal native iPadOS SwiftUI scaffold named MolApp.
@@ -127,4 +128,17 @@
 - **Learnings for future iterations:**
   - Centralize visibility feature keys in `MoleculeVisibilityFeature` so toolbar labels, tests, and bridge payloads stay aligned.
   - Visibility controls can share the representation toolbar container as long as the WKWebView remains the full-screen back layer.
+---
+## 2026-04-30 21:50:47 KST - US-011
+- Added a native bottom selection sheet overlay with collapsed and expanded states.
+- Added `MoleculeSelection` bridge state, decoded viewer `selectionChanged` messages, and wired clear-selection through the existing bridge.
+- Updated the Mol* viewer to publish selection details from click loci and from `setSelection`/`clearSelection` commands.
+- Files changed: `MolApp/MolStarBridge.swift`, `MolApp/MoleculeViewerView.swift`, `MolApp/Resources/viewer.html`, `MolAppTests/MolStarBridgeTests.swift`, `AGENTS.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' test CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: temporary Playwright with system Google Chrome opened `MolApp/Resources/viewer.html`; the viewer reached `ready`, rendered one canvas, a Mol* atom click emitted a `selectionChanged` message for `GLY A 1 CA`, `setSelection` emitted `ALA B 2 CB`, and `clearSelection` emitted a null selection.
+- Native simulator verification result: installed and launched `com.example.MolApp` on the booted iPad Pro 13-inch simulator; accessibility inspection showed the bottom Selection sheet in collapsed and expanded states without resizing the WKWebView viewport.
+- **Learnings for future iterations:**
+  - Decode viewer event messages before command results in `MolStarBridge` so non-command WKWebView messages do not become command parse errors.
+  - Use Mol* `StructureElement.Loci.getFirstLocation` plus `StructureProperties` to extract selected atom, residue, chain, and model fields from click interactions.
+  - Keep the selection sheet as another `MoleculeViewerView` overlay so it does not permanently consume viewport space.
 ---

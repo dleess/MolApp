@@ -4,6 +4,7 @@ struct MoleculeViewerView: View {
     @StateObject private var bridge = MolStarBridge()
     @State private var isFileImporterPresented = false
     @State private var isRepresentationToolbarExpanded = true
+    @State private var isSelectionSheetExpanded = false
     @State private var pdbIdText = ""
     @State private var selectedRepresentation: MoleculeRepresentation = .ribbon
     @State private var visibilityStates: [MoleculeVisibilityFeature: Bool] = [
@@ -66,6 +67,7 @@ struct MoleculeViewerView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             representationToolbar
+            selectionBottomSheet
         }
         .fileImporter(
             isPresented: $isFileImporterPresented,
@@ -143,6 +145,89 @@ struct MoleculeViewerView: View {
         .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
         .padding(.trailing, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+    }
+
+    private var selectionBottomSheet: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Selection", systemImage: "scope")
+                    .font(.headline)
+
+                Spacer()
+
+                Button {
+                    isSelectionSheetExpanded.toggle()
+                } label: {
+                    Label(
+                        isSelectionSheetExpanded ? "Collapse selection details" : "Expand selection details",
+                        systemImage: isSelectionSheetExpanded ? "chevron.down" : "chevron.up"
+                    )
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.bordered)
+                .tint(.white.opacity(0.28))
+                .accessibilityLabel(isSelectionSheetExpanded ? "Collapse selection details" : "Expand selection details")
+            }
+
+            if isSelectionSheetExpanded {
+                if let selection = bridge.currentSelection {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(selection.label ?? "Selected \(selection.type)")
+                            .font(.subheadline.weight(.semibold))
+
+                        selectionDetailRow(title: "Model", value: selection.model.map(String.init))
+                        selectionDetailRow(title: "Chain", value: selection.chain)
+                        selectionDetailRow(title: "Residue", value: selection.residueNumber.map(String.init))
+                        selectionDetailRow(title: "Atom", value: selection.atomName)
+                    }
+
+                    Button {
+                        localErrorMessage = nil
+                        bridge.clearSelection()
+                    } label: {
+                        Label("Clear Selection", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                } else {
+                    Text("No atom or residue selected")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+            } else {
+                Text(bridge.currentSelection?.label ?? "No selection")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(14)
+        .frame(maxWidth: 420, alignment: .leading)
+        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+
+    private func selectionDetailRow(title: String, value: String?) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.white.opacity(0.68))
+                .frame(width: 68, alignment: .leading)
+
+            Text(selectionDetailValue(value))
+                .fontWeight(.medium)
+        }
+        .font(.footnote)
+    }
+
+    private func selectionDetailValue(_ value: String?) -> String {
+        guard let value, !value.isEmpty else {
+            return "Unavailable"
+        }
+
+        return value
     }
 
     private func handleFileImport(_ result: Result<[URL], Error>) {

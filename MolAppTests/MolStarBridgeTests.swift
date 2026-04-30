@@ -60,4 +60,47 @@ final class MolStarBridgeTests: XCTestCase {
         XCTAssertEqual(MoleculeVisibilityFeature.ligand.rawValue, "ligand")
         XCTAssertEqual(MoleculeVisibilityFeature.disulfide.rawValue, "disulfide")
     }
+
+    func testBridgeReceivesSelectionChangedEvent() throws {
+        let bridge = MolStarBridge()
+
+        try bridge.receive(messageBody: [
+            "event": "selectionChanged",
+            "selection": [
+                "type": "atom",
+                "label": "GLY A 1 CA",
+                "model": 1,
+                "chain": "A",
+                "residueNumber": 1,
+                "atomName": "CA"
+            ]
+        ])
+
+        XCTAssertEqual(
+            bridge.currentSelection,
+            MoleculeSelection(type: "atom", label: "GLY A 1 CA", model: 1, chain: "A", residueNumber: 1, atomName: "CA")
+        )
+    }
+
+    func testBridgeClearsSelectionFromSelectionChangedEvent() throws {
+        let bridge = MolStarBridge()
+
+        try bridge.receive(messageBody: [
+            "event": "selectionChanged",
+            "selection": [
+                "type": "atom",
+                "label": "GLY A 1 CA",
+                "model": 1,
+                "chain": "A",
+                "residueNumber": 1,
+                "atomName": "CA"
+            ]
+        ])
+        try bridge.receive(messageBody: [
+            "event": "selectionChanged",
+            "selection": NSNull()
+        ])
+
+        XCTAssertNil(bridge.currentSelection)
+    }
 }

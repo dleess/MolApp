@@ -38,9 +38,19 @@ struct MolStarCommandResult: Decodable {
     }
 }
 
+struct MoleculeSelection: Codable, Equatable {
+    let type: String
+    let label: String?
+    let model: Int?
+    let chain: String?
+    let residueNumber: Int?
+    let atomName: String?
+}
+
 final class MolStarBridge: NSObject, ObservableObject {
     @Published private(set) var lastCommandResult: MolStarCommandResult?
     @Published private(set) var lastErrorMessage: String?
+    @Published private(set) var currentSelection: MoleculeSelection?
 
     private weak var webView: WKWebView?
     private let encoder = JSONEncoder()
@@ -69,7 +79,7 @@ final class MolStarBridge: NSObject, ObservableObject {
         send(.focusSelection, payload: EmptyPayload())
     }
 
-    func setSelection(_ selection: SelectionPayload) {
+    func setSelection(_ selection: MoleculeSelection) {
         send(.setSelection, payload: selection)
     }
 
@@ -96,6 +106,17 @@ final class MolStarBridge: NSObject, ObservableObject {
         lastCommandResult = result
         lastErrorMessage = result.success ? nil : result.error
     }
+
+    func receive(messageBody: Any) throws {
+        if let event = try MolStarSelectionEvent(messageBody: messageBody) {
+            currentSelection = event.selection
+            return
+        }
+
+        let data = try JSONSerialization.data(withJSONObject: messageBody)
+        let result = try JSONDecoder().decode(MolStarCommandResult.self, from: data)
+        receive(result: result)
+    }
 }
 
 extension MolStarBridge: WKScriptMessageHandler {
@@ -103,12 +124,25 @@ extension MolStarBridge: WKScriptMessageHandler {
         guard message.name == "molapp" else { return }
 
         do {
-            let data = try JSONSerialization.data(withJSONObject: message.body)
-            let result = try JSONDecoder().decode(MolStarCommandResult.self, from: data)
-            receive(result: result)
+            try receive(messageBody: message.body)
         } catch {
             lastErrorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct MolStarSelectionEvent: Decodable {
+    let event: String
+    let selection: MoleculeSelection?
+
+    init?(messageBody: Any) throws {
+        guard let object = messageBody as? [String: Any],
+              object["event"] as? String == "selectionChanged" else {
+            return nil
+        }
+
+        let data = try JSONSerialization.data(withJSONObject: object)
+        self = try JSONDecoder().decode(MolStarSelectionEvent.self, from: data)
     }
 }
 
@@ -137,13 +171,4 @@ private struct RepresentationPayload: Encodable {
 private struct VisibilityPayload: Encodable {
     let feature: String
     let isVisible: Bool
-}
-
-struct SelectionPayload: Encodable {
-    let type: String
-    let label: String?
-    let model: Int?
-    let chain: String?
-    let residueNumber: Int?
-    let atomName: String?
 }
