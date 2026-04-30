@@ -68,6 +68,8 @@
       const host = document.getElementById('molstar-host');
       const status = document.getElementById('viewer-status');
       const statusMessage = document.getElementById('viewer-status-message');
+      const doubleTapDelayMs = 320;
+      let lastTapTime = 0;
 
       function showError(error) {
         const message = error && error.message ? error.message : String(error);
@@ -148,6 +150,35 @@
           window.molapp.selection = null;
         }
       };
+
+      async function focusSelectedRegionFromDoubleTap(event) {
+        if (!window.molapp || !window.molapp.selection) {
+          return;
+        }
+
+        event.preventDefault();
+        try {
+          await commandHandlers.focusSelection({});
+          postCommandResult({ id: 'double-tap-focus', command: 'focusSelection', success: true });
+        } catch (error) {
+          const message = error && error.message ? error.message : String(error);
+          postCommandResult({ id: 'double-tap-focus', command: 'focusSelection', success: false, error: message });
+        }
+      }
+
+      host.addEventListener('touchend', function (event) {
+        if (event.changedTouches.length === 1 && event.touches.length === 0) {
+          const now = Date.now();
+          const elapsed = now - lastTapTime;
+          lastTapTime = now;
+
+          if (elapsed <= doubleTapDelayMs) {
+            focusSelectedRegionFromDoubleTap(event);
+          }
+        }
+      }, { passive: false });
+
+      host.addEventListener('dblclick', focusSelectedRegionFromDoubleTap);
 
       window.addEventListener('error', function (event) {
         showError(event.error || event.message);

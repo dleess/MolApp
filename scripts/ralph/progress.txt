@@ -6,6 +6,7 @@
 - `MolAppTests` is an XCTest target wired into the shared `MolApp` scheme; use `xcodebuild ... test CODE_SIGNING_ALLOWED=NO` for test verification when app code has test coverage.
 - Local file import extension allowlists and Mol* data format mapping live in `LocalStructureFileLoader`; UI code should call that helper rather than duplicating `pdb`/`mmcif` handling.
 - PDB ID loading should validate with `PdbIdentifier.normalized(...)` in native UI and route through `loadPdbId`; the viewer-side handler loads `https://files.rcsb.org/download/{PDB_ID}.cif` as `mmcif`.
+- Keep iPad camera gestures owned by Mol*/`viewer.html`: disable WKWebView scroll and pinch interception, keep `#molstar-host` at `touch-action: none`, and add custom gesture behavior only when Mol* does not already provide it.
 
 ## 2026-04-30 17:04:18 KST - US-001
 - Implemented a minimal native iPadOS SwiftUI scaffold named MolApp.
@@ -89,4 +90,16 @@
   - Keep native PDB ID validation in `PdbIdentifier` so SwiftUI views and tests share the same normalization rules.
   - Prefer explicit RCSB `.cif` URLs in the JS handler when acceptance criteria require a visible download URL, rather than Mol* provider shortcuts.
   - The PDB ID input should remain in the overlay with local file loading available in the same control cluster.
+---
+## 2026-04-30 21:37:10 KST - US-008
+- Implemented iPad touch camera gesture support by keeping Mol* as the owner of rotate, pan, and pinch interactions inside the WKWebView viewport.
+- Disabled native WKWebView scroll and pinch interception so one-finger drag, two-finger drag, and pinch gestures can reach the Mol* canvas.
+- Added a double-tap focus path on the Mol* host that calls `focusSelection` only when a current selection exists and does not interact with native overlay controls.
+- Files changed: `AGENTS.md`, `MolApp/MolStarWebView.swift`, `MolApp/Resources/viewer.html`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' test CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: temporary Playwright with system Google Chrome opened `MolApp/Resources/viewer.html`; the viewer reached `ready`, one canvas rendered, double tap without a selection posted no command, and double tap after setting a selection posted a successful `focusSelection` command.
+- Native simulator verification result: installed and launched `com.example.MolApp` on iPad Pro 13-inch (M5), OS 26.4.1; the full-screen Mol* viewport rendered behind the overlay controls.
+- **Learnings for future iterations:**
+  - Let Mol* handle its built-in touch camera controls instead of recreating rotate, pan, or pinch in SwiftUI.
+  - Native overlay controls sit outside the HTML host, so viewer-only double-tap handling can be bound to `#molstar-host` without triggering file loading or toolbar state.
 ---
