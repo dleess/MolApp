@@ -75,3 +75,4 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Native viewer controls should stay as `MoleculeViewerView` overlays and call `MolStarBridge` commands directly; representation buttons use `MoleculeRepresentation` raw values with `setRepresentation`.
 - Structural visibility controls use `MoleculeVisibilityFeature` raw values and route through `MolStarBridge.toggleVisibility`; keep feature keys centralized there rather than hard-coding them in toolbar button actions.
 - Selection UI should read `MolStarBridge.currentSelection`; `viewer.html` publishes selection changes with `{ event: "selectionChanged", selection }`, and Mol* click loci are converted with `StructureElement.Loci.getFirstLocation` plus `StructureProperties`.
+- Selection highlight and dimming should stay in `viewer.html` using Mol* `lociSelects.selectOnly` and `lociHighlights.highlightOnly`; clear both managers when clearing selection or loading a new structure.

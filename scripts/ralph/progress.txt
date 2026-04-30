@@ -10,6 +10,7 @@
 - Native viewport controls belong in `MoleculeViewerView` overlays and should call `MolStarBridge` commands directly; representation choices use `MoleculeRepresentation` raw values routed through `setRepresentation`.
 - Structural visibility feature keys belong in `MoleculeVisibilityFeature` and should be routed through `MolStarBridge.toggleVisibility` from native overlay controls.
 - Selection details flow through `MolStarBridge.currentSelection` using viewer-side `selectionChanged` messages; Mol* click loci can be converted with `StructureElement.Loci.getFirstLocation` and `StructureProperties`.
+- Selection highlight and context dimming are viewer-side Mol* interactivity concerns: use `lociSelects.selectOnly` plus `lociHighlights.highlightOnly`, and clear both on `clearSelection` or before loading another structure.
 
 ## 2026-04-30 17:04:18 KST - US-001
 - Implemented a minimal native iPadOS SwiftUI scaffold named MolApp.
@@ -141,4 +142,15 @@
   - Decode viewer event messages before command results in `MolStarBridge` so non-command WKWebView messages do not become command parse errors.
   - Use Mol* `StructureElement.Loci.getFirstLocation` plus `StructureProperties` to extract selected atom, residue, chain, and model fields from click interactions.
   - Keep the selection sheet as another `MoleculeViewerView` overlay so it does not permanently consume viewport space.
+---
+## 2026-04-30 21:56:24 KST - US-012
+- Implemented viewer-side selection highlighting and context dimming for Mol* click selections.
+- Clearing selection now clears Mol* highlight/select managers and restores normal visual state; loading a new local or PDB structure also clears stale selection visuals first.
+- Files changed: `MolApp/Resources/viewer.html`, `AGENTS.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' test CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: temporary Playwright with system Google Chrome opened `MolApp/Resources/viewer.html`; a loaded local PDB emitted a Mol* selection for `GLY A 1 N`, selection visuals reported selected and context dimmed, `clearSelection` restored selected/contextDimmed to false, the viewer stayed `ready`, and one canvas remained rendered with no browser errors.
+- **Learnings for future iterations:**
+  - Use Mol* interactivity managers for selection visuals instead of adding native overlay effects over the canvas.
+  - Clear `lociHighlights` and `lociSelects` before new structure loads so stale selected loci do not survive a data replacement.
+  - Browser verification can deterministically trigger `plugin.behaviors.interaction.click.next(...)` with a real `StructureElement.Loci` rather than relying on coordinate clicks.
 ---

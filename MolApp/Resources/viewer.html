@@ -95,8 +95,43 @@
         }
       }
 
-      function setMolAppSelection(selection) {
+      function clearSelectionVisuals() {
+        if (!window.molapp || !window.molapp.viewer) {
+          return;
+        }
+
+        const interactivity = window.molapp.viewer.plugin.managers.interactivity;
+        interactivity.lociHighlights.clearHighlights();
+        interactivity.lociSelects.deselectAll();
+        window.molapp.selectionVisualState = {
+          selected: false,
+          contextDimmed: false
+        };
+      }
+
+      function applySelectionVisuals(loci) {
+        clearSelectionVisuals();
+        if (!loci || !window.molapp || !window.molapp.viewer) {
+          return;
+        }
+
+        const interactivity = window.molapp.viewer.plugin.managers.interactivity;
+        const lociBundle = { loci };
+        interactivity.lociSelects.selectOnly(lociBundle, true);
+        interactivity.lociHighlights.highlightOnly(lociBundle, true);
+        window.molapp.selectionVisualState = {
+          selected: true,
+          contextDimmed: true
+        };
+      }
+
+      function setMolAppSelection(selection, loci) {
         window.molapp.selection = selection;
+        if (selection && loci) {
+          applySelectionVisuals(loci);
+        } else if (!selection) {
+          clearSelectionVisuals();
+        }
         postSelectionChanged(selection);
       }
 
@@ -157,6 +192,7 @@
             throw new Error('loadLocalStructure requires data and format.');
           }
 
+          clearSelectionVisuals();
           await window.molapp.viewer.loadStructureFromData(payload.data, payload.format, {
             dataLabel: payload.label || 'Local structure'
           });
@@ -169,6 +205,7 @@
 
           const normalizedPdbId = pdbId.toUpperCase();
           const url = 'https://files.rcsb.org/download/' + normalizedPdbId + '.cif';
+          clearSelectionVisuals();
           await window.molapp.viewer.loadStructureFromUrl(url, 'mmcif', false, {
             label: normalizedPdbId
           });
@@ -196,7 +233,7 @@
       function bindSelectionUpdates(viewer) {
         viewer.plugin.behaviors.interaction.click.subscribe(function (event) {
           const loci = event && event.current ? event.current.loci : null;
-          setMolAppSelection(selectionFromLoci(loci));
+          setMolAppSelection(selectionFromLoci(loci), loci);
         });
       }
 
@@ -264,7 +301,11 @@
           handleNativeCommand,
           representation: null,
           visibility: {},
-          selection: null
+          selection: null,
+          selectionVisualState: {
+            selected: false,
+            contextDimmed: false
+          }
         };
         bindSelectionUpdates(viewer);
         document.documentElement.dataset.viewerState = 'ready';
