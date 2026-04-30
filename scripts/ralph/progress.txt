@@ -1,5 +1,6 @@
 ## Codebase Patterns
 - The iPadOS app builds through `MolApp.xcodeproj` with shared scheme `MolApp`; use the README `xcodebuild` command with `CODE_SIGNING_ALLOWED=NO` for simulator verification.
+- Keep `MoleculeViewerView` viewport-first: the primary viewer should be the back layer in a full-screen `ZStack`, with controls added as overlays instead of sidebars that resize the viewport.
 
 ## 2026-04-30 17:04:18 KST - US-001
 - Implemented a minimal native iPadOS SwiftUI scaffold named MolApp.
@@ -11,4 +12,14 @@
 - **Learnings for future iterations:**
   - The available iPad Pro 13-inch simulator runtime is reported by xcodebuild as `26.4.1`, even though the SDK path is `iPhoneSimulator26.4.sdk`.
   - This repo did not previously contain an app project, so future UI stories should extend the new `MoleculeViewerView` rather than adding a separate root.
+---
+## 2026-04-30 17:06:55 KST - US-002
+- Implemented a full-screen SwiftUI molecule viewport placeholder in `MoleculeViewerView`.
+- Added compact floating status controls over the viewport without introducing a fixed sidebar or constraining the viewport.
+- Files changed: `MolApp/MoleculeViewerView.swift`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' build CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: native iPadOS UI verified in iOS Simulator. Installed and launched `com.example.MolApp` on iPad Pro 13-inch (M5), OS 26.4.1; portrait screenshot showed the viewport filling the screen behind floating overlay controls. Browser verification is not applicable because this story changes native SwiftUI UI, not a web surface.
+- **Learnings for future iterations:**
+  - Future viewer controls should be overlaid on `MoleculeViewerView` rather than placed in sidebars, preserving the full-screen viewport contract.
+  - The available simulator tooling in this environment can install, launch, and screenshot the native app for UI checks.
 ---
