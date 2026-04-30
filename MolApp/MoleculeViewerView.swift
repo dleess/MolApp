@@ -21,28 +21,7 @@ struct MoleculeViewerView: View {
     }
 
     private var viewport: some View {
-        Rectangle()
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.03, green: 0.05, blue: 0.07),
-                        Color(red: 0.11, green: 0.13, blue: 0.16)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay {
-                Circle()
-                    .stroke(.white.opacity(0.18), lineWidth: 2)
-                    .frame(width: 240, height: 240)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                Image(systemName: "cube.transparent")
-                    .font(.system(size: 48, weight: .light))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .padding()
-            }
+        MolStarWebView()
             .ignoresSafeArea()
     }
 }

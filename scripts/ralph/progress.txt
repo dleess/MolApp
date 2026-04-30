@@ -1,6 +1,7 @@
 ## Codebase Patterns
 - The iPadOS app builds through `MolApp.xcodeproj` with shared scheme `MolApp`; use the README `xcodebuild` command with `CODE_SIGNING_ALLOWED=NO` for simulator verification.
 - Keep `MoleculeViewerView` viewport-first: the primary viewer should be the back layer in a full-screen `ZStack`, with controls added as overlays instead of sidebars that resize the viewport.
+- Bundled WKWebView assets should be added to the Xcode target resources and loaded with `loadFileURL(_:allowingReadAccessTo:)`; Xcode copies `MolApp/Resources/viewer.html` into the app bundle root as `viewer.html`.
 
 ## 2026-04-30 17:04:18 KST - US-001
 - Implemented a minimal native iPadOS SwiftUI scaffold named MolApp.
@@ -22,4 +23,15 @@
 - **Learnings for future iterations:**
   - Future viewer controls should be overlaid on `MoleculeViewerView` rather than placed in sidebars, preserving the full-screen viewport contract.
   - The available simulator tooling in this environment can install, launch, and screenshot the native app for UI checks.
+---
+## 2026-04-30 17:10:02 KST - US-003
+- Implemented a SwiftUI-compatible `WKWebView` wrapper for the molecule viewport.
+- Added bundled local `viewer.html` with a full-viewport Mol* host placeholder and wired it into the app target resources.
+- Replaced the SwiftUI-only viewport placeholder with the local HTML-backed web view while preserving overlay controls.
+- Files changed: `MolApp/MolStarWebView.swift`, `MolApp/MoleculeViewerView.swift`, `MolApp/Resources/viewer.html`, `MolApp.xcodeproj/project.pbxproj`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' build CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: native WKWebView verification completed in iOS Simulator. Installed and launched `com.example.MolApp` on iPad Pro 13-inch (M5), OS 26.4.1; screenshot showed the local HTML Mol* viewport placeholder rendering full-screen behind the native overlay.
+- **Learnings for future iterations:**
+  - `WKWebViewConfiguration.defaultWebpagePreferences.allowsContentJavaScript = true` is available with the current iPadOS deployment target and is the narrow setting needed before Mol* JavaScript is bundled.
+  - Resource lookup uses `Bundle.main.url(forResource: "viewer", withExtension: "html")`, so future Mol* assets should either live beside the copied HTML resource or update the read-access directory deliberately.
 ---

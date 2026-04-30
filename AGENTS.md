@@ -63,3 +63,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+## MolApp Project Notes
+
+- WKWebView viewer assets are bundled as Xcode target resources and loaded with `loadFileURL(_:allowingReadAccessTo:)`; `MolApp/Resources/viewer.html` is copied into the app bundle root as `viewer.html`.

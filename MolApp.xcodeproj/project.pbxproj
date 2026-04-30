@@ -9,12 +9,16 @@
 /* Begin PBXBuildFile section */
 		111111111111111111111111 /* MolAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111112 /* MolAppApp.swift */; };
 		111111111111111111111113 /* MoleculeViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111114 /* MoleculeViewerView.swift */; };
+		111111111111111111111124 /* MolStarWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111125 /* MolStarWebView.swift */; };
+		111111111111111111111126 /* viewer.html in Resources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111127 /* viewer.html */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		111111111111111111111115 /* MolApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MolApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		111111111111111111111112 /* MolAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MolAppApp.swift; sourceTree = "<group>"; };
 		111111111111111111111114 /* MoleculeViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoleculeViewerView.swift; sourceTree = "<group>"; };
+		111111111111111111111125 /* MolStarWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MolStarWebView.swift; sourceTree = "<group>"; };
+		111111111111111111111127 /* viewer.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = Resources/viewer.html; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -41,6 +45,8 @@
 			children = (
 				111111111111111111111112 /* MolAppApp.swift */,
 				111111111111111111111114 /* MoleculeViewerView.swift */,
+				111111111111111111111125 /* MolStarWebView.swift */,
+				111111111111111111111127 /* viewer.html */,
 			);
 			path = MolApp;
 			sourceTree = "<group>";
@@ -111,6 +117,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				111111111111111111111126 /* viewer.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -123,6 +130,7 @@
 			files = (
 				111111111111111111111111 /* MolAppApp.swift in Sources */,
 				111111111111111111111113 /* MoleculeViewerView.swift in Sources */,
+				111111111111111111111124 /* MolStarWebView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
