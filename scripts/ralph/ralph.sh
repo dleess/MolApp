@@ -137,7 +137,6 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   else
     OUTPUT="$(codex exec \
       --dangerously-bypass-approvals-and-sandbox \
-      --ask-for-approval never \
       --cd "$PROJECT_ROOT" \
       < "$SCRIPT_DIR/CODEX.md" 2>&1 | tee /dev/stderr)" || true
   fi
