@@ -148,7 +148,7 @@
         "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -72,3 +72,4 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Local structure imports are routed through `LocalStructureFileLoader`; keep accepted file extensions and Mol* data format strings there rather than duplicating them in SwiftUI views.
 - PDB ID imports are normalized by `PdbIdentifier` in `MoleculeViewerView.swift` and sent through `MolStarBridge.loadPdbId`; the HTML viewer handler should keep using explicit RCSB `.cif` URLs loaded as `mmcif`.
 - Keep iPad camera gestures owned by Mol*/`viewer.html`: the WKWebView scroll view should not scroll or pinch-zoom, and `#molstar-host` should keep `touch-action: none` so one-finger rotate, two-finger pan, and pinch zoom reach Mol*.
+- Native viewer controls should stay as `MoleculeViewerView` overlays and call `MolStarBridge` commands directly; representation buttons use `MoleculeRepresentation` raw values with `setRepresentation`.

@@ -3,12 +3,14 @@ import SwiftUI
 struct MoleculeViewerView: View {
     @StateObject private var bridge = MolStarBridge()
     @State private var isFileImporterPresented = false
+    @State private var isRepresentationToolbarExpanded = true
     @State private var pdbIdText = ""
+    @State private var selectedRepresentation: MoleculeRepresentation = .ribbon
     @State private var statusMessage = "Ready for structure loading"
     @State private var localErrorMessage: String?
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             viewport
 
             VStack(alignment: .leading, spacing: 8) {
@@ -56,6 +58,9 @@ struct MoleculeViewerView: View {
             .padding(14)
             .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
             .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            representationToolbar
         }
         .fileImporter(
             isPresented: $isFileImporterPresented,
@@ -71,6 +76,8 @@ struct MoleculeViewerView: View {
 
             if result.command == .loadPdbId {
                 statusMessage = "Loaded \(PdbIdentifier.displayName(from: pdbIdText))"
+            } else if result.command == .setRepresentation {
+                statusMessage = "\(selectedRepresentation.title) representation"
             }
         }
     }
@@ -82,6 +89,38 @@ struct MoleculeViewerView: View {
 
     private var errorMessage: String? {
         localErrorMessage ?? bridge.lastErrorMessage
+    }
+
+    private var representationToolbar: some View {
+        VStack(spacing: 8) {
+            Button {
+                isRepresentationToolbarExpanded.toggle()
+            } label: {
+                Label("Representations", systemImage: isRepresentationToolbarExpanded ? "chevron.right" : "paintpalette")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .accessibilityLabel(isRepresentationToolbarExpanded ? "Collapse representation toolbar" : "Expand representation toolbar")
+
+            if isRepresentationToolbarExpanded {
+                ForEach(MoleculeRepresentation.allCases) { representation in
+                    Button {
+                        setRepresentation(representation)
+                    } label: {
+                        Label(representation.title, systemImage: representation.systemImage)
+                            .frame(minWidth: 88, alignment: .leading)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(selectedRepresentation == representation ? .blue : .white.opacity(0.28))
+                    .foregroundStyle(.white)
+                }
+            }
+        }
+        .padding(8)
+        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.trailing, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
     }
 
     private func handleFileImport(_ result: Result<[URL], Error>) {
@@ -105,6 +144,44 @@ struct MoleculeViewerView: View {
             bridge.loadPdbId(pdbId)
         } catch {
             localErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func setRepresentation(_ representation: MoleculeRepresentation) {
+        selectedRepresentation = representation
+        localErrorMessage = nil
+        bridge.setRepresentation(representation.rawValue)
+    }
+}
+
+enum MoleculeRepresentation: String, CaseIterable, Identifiable {
+    case ribbon
+    case surface
+    case stick
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .ribbon:
+            "Ribbon"
+        case .surface:
+            "Surface"
+        case .stick:
+            "Stick"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .ribbon:
+            "scribble"
+        case .surface:
+            "circle.hexagongrid"
+        case .stick:
+            "line.diagonal"
         }
     }
 }

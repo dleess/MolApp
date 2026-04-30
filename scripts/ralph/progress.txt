@@ -7,6 +7,7 @@
 - Local file import extension allowlists and Mol* data format mapping live in `LocalStructureFileLoader`; UI code should call that helper rather than duplicating `pdb`/`mmcif` handling.
 - PDB ID loading should validate with `PdbIdentifier.normalized(...)` in native UI and route through `loadPdbId`; the viewer-side handler loads `https://files.rcsb.org/download/{PDB_ID}.cif` as `mmcif`.
 - Keep iPad camera gestures owned by Mol*/`viewer.html`: disable WKWebView scroll and pinch interception, keep `#molstar-host` at `touch-action: none`, and add custom gesture behavior only when Mol* does not already provide it.
+- Native viewport controls belong in `MoleculeViewerView` overlays and should call `MolStarBridge` commands directly; representation choices use `MoleculeRepresentation` raw values routed through `setRepresentation`.
 
 ## 2026-04-30 17:04:18 KST - US-001
 - Implemented a minimal native iPadOS SwiftUI scaffold named MolApp.
@@ -102,4 +103,15 @@
 - **Learnings for future iterations:**
   - Let Mol* handle its built-in touch camera controls instead of recreating rotate, pan, or pinch in SwiftUI.
   - Native overlay controls sit outside the HTML host, so viewer-only double-tap handling can be bound to `#molstar-host` without triggering file loading or toolbar state.
+---
+## 2026-04-30 21:40:15 KST - US-009
+- Added a trailing floating representation toolbar over the full-screen viewport.
+- Added Ribbon, Surface, and Stick representation actions that call `MolStarBridge.setRepresentation` without reloading the loaded structure.
+- Added compact collapse/expand behavior so the toolbar can shrink to a single edge button.
+- Files changed: `MolApp/MoleculeViewerView.swift`, `AGENTS.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' test CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: native iPadOS UI verified in iOS Simulator on iPad Pro 13-inch, OS 26.3.1. The Ribbon, Surface, and Stick toolbar buttons appeared as a trailing viewport overlay; tapping Surface updated status to `Surface representation`; tapping the collapse control reduced the toolbar to one edge button. Browser verification is not applicable because this story changes native SwiftUI UI, not a web page surface.
+- **Learnings for future iterations:**
+  - Keep compact toolbars as overlays in `MoleculeViewerView` so they do not resize the WKWebView viewport.
+  - Route representation commands through `MolStarBridge.setRepresentation` from native controls; the viewer-side handler already accepts the command without reloading structures.
 ---
