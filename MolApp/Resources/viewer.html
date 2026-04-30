@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>MolApp Viewer</title>
+  <link rel="stylesheet" href="molstar/molstar.css">
   <style>
     html,
     body,
@@ -22,37 +23,98 @@
 
     #molstar-host {
       position: relative;
-      display: grid;
-      place-items: center;
       touch-action: none;
     }
 
-    .empty-state {
+    #molstar-host .msp-plugin {
+      width: 100%;
+      height: 100%;
+    }
+
+    .viewer-status {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
       display: grid;
-      gap: 12px;
-      justify-items: center;
+      place-items: center;
+      padding: 24px;
+      text-align: center;
+      background: #0b0f14;
     }
 
-    .orbital {
-      width: 230px;
-      aspect-ratio: 1;
-      border: 2px solid rgba(255, 255, 255, 0.16);
-      border-radius: 50%;
-      box-shadow: inset 0 0 42px rgba(90, 160, 255, 0.15);
+    .viewer-status[hidden] {
+      display: none;
     }
 
-    .label {
+    .viewer-status__message {
+      max-width: 520px;
       color: rgba(255, 255, 255, 0.66);
       letter-spacing: 0;
+    }
+
+    .viewer-status--error .viewer-status__message {
+      color: #ffb4a8;
     }
   </style>
 </head>
 <body>
-  <main id="molstar-host" aria-label="Molstar molecule viewport">
-    <div class="empty-state">
-      <div class="orbital" aria-hidden="true"></div>
-      <div class="label">Mol* viewport ready</div>
-    </div>
-  </main>
+  <main id="molstar-host" aria-label="Molstar molecule viewport"></main>
+  <div id="viewer-status" class="viewer-status" role="status">
+    <div id="viewer-status-message" class="viewer-status__message">Initializing Mol* viewer</div>
+  </div>
+  <script src="molstar/molstar.js"></script>
+  <script>
+    (function () {
+      const host = document.getElementById('molstar-host');
+      const status = document.getElementById('viewer-status');
+      const statusMessage = document.getElementById('viewer-status-message');
+
+      function showError(error) {
+        const message = error && error.message ? error.message : String(error);
+        window.molapp = { error: message };
+        document.documentElement.dataset.viewerState = 'error';
+        status.classList.add('viewer-status--error');
+        status.hidden = false;
+        statusMessage.textContent = 'Mol* initialization failed: ' + message;
+      }
+
+      window.addEventListener('error', function (event) {
+        showError(event.error || event.message);
+      });
+
+      window.addEventListener('unhandledrejection', function (event) {
+        showError(event.reason || 'Unknown initialization error');
+      });
+
+      async function initializeViewer() {
+        if (!window.molstar || !window.molstar.Viewer) {
+          throw new Error('Bundled Mol* viewer script did not load.');
+        }
+
+        const viewer = await window.molstar.Viewer.create(host, {
+          layoutIsExpanded: false,
+          layoutShowControls: false,
+          layoutShowRemoteState: false,
+          layoutShowSequence: false,
+          layoutShowLog: false,
+          layoutShowLeftPanel: false,
+          viewportShowControls: false,
+          viewportShowExpand: false,
+          viewportShowSettings: false,
+          viewportShowSelectionMode: false,
+          viewportShowAnimation: false,
+          viewportShowTrajectoryControls: false,
+          viewportShowScreenshotControls: false,
+          viewportBackgroundColor: '#0b0f14'
+        });
+
+        window.molapp = { viewer };
+        document.documentElement.dataset.viewerState = 'ready';
+        status.hidden = true;
+      }
+
+      initializeViewer().catch(showError);
+    }());
+  </script>
 </body>
 </html>

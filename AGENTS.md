@@ -67,3 +67,4 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ## MolApp Project Notes
 
 - WKWebView viewer assets are bundled as Xcode target resources and loaded with `loadFileURL(_:allowingReadAccessTo:)`; `MolApp/Resources/viewer.html` is copied into the app bundle root as `viewer.html`.
+- Mol* viewer assets live under `MolApp/Resources/molstar` and are copied as a folder resource, so `viewer.html` should reference them with relative paths such as `molstar/molstar.js`.
