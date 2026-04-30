@@ -1,0 +1,220 @@
+{
+  "project": "MolApp",
+  "branchName": "ralph/ipados-molstar-molecule-viewer",
+  "description": "iPadOS Mol* Molecule Viewer - native SwiftUI iPad app with a full-screen Mol* 3D molecule viewport, local structure loading, PDB ID loading, touch gestures, representation controls, and selection details for structural biology and chemistry researchers.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Scaffold buildable iPadOS SwiftUI project",
+      "description": "As a developer, I need a buildable native iPadOS SwiftUI project so that the molecule viewer can be implemented in a real app shell.",
+      "acceptanceCriteria": [
+        "Create an iPadOS SwiftUI app project named MolApp",
+        "App launches into a root MoleculeViewerView",
+        "Project includes the minimum files needed to build from the command line or Xcode",
+        "Document the exact build command in the repository",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add full-screen molecule viewer layout",
+      "description": "As a researcher, I want the molecule viewer to use the full iPad screen so that the structure remains the primary workspace.",
+      "acceptanceCriteria": [
+        "MoleculeViewerView contains a full-screen viewport area that fills available space",
+        "The viewport remains behind overlay controls instead of being constrained by a fixed sidebar",
+        "Layout supports portrait and landscape iPad orientations",
+        "No fixed desktop-style sidebar is introduced",
+        "Typecheck passes",
+        "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Embed WKWebView for Mol* rendering",
+      "description": "As a developer, I need a WKWebView-based viewer container so that Mol* can render molecular structures inside the native app.",
+      "acceptanceCriteria": [
+        "Add a SwiftUI-compatible WKWebView wrapper for the molecule viewport",
+        "WKWebView loads a bundled local HTML viewer file",
+        "The loaded HTML viewer renders a visible placeholder or empty Mol* host element",
+        "WKWebView uses settings compatible with local bundled web assets",
+        "Typecheck passes",
+        "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Bundle and initialize Mol* viewer assets",
+      "description": "As a developer, I need Mol* bundled with the app so that the core 3D viewer does not depend on loading the viewer library from the network.",
+      "acceptanceCriteria": [
+        "Mol* viewer assets are included as local app bundle resources",
+        "The local viewer HTML initializes a Mol* plugin instance",
+        "The Mol* canvas fills the WKWebView viewport",
+        "Initialization errors are surfaced to the native app or visible debug state",
+        "Typecheck passes",
+        "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Create Swift to JavaScript bridge commands",
+      "description": "As a developer, I need a small Swift-to-JavaScript bridge so that native controls can drive the Mol* viewer.",
+      "acceptanceCriteria": [
+        "Bridge exposes loadLocalStructure, loadPdbId, setRepresentation, toggleVisibility, focusSelection, setSelection, and clearSelection commands",
+        "Bridge command payloads are encoded as JSON instead of string-concatenated JavaScript values",
+        "JavaScript side handles unknown commands with a non-crashing error response",
+        "Swift side can receive command success or failure messages from WKWebView",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Load local PDB and mmCIF files",
+      "description": "As a researcher, I want to open local molecular structure files from the iPad Files app so that I can inspect my own data.",
+      "acceptanceCriteria": [
+        "Add a file picker entry point in the viewer UI",
+        "File picker accepts pdb, cif, and mmcif files",
+        "Selected file content is sent to Mol* through loadLocalStructure",
+        "A valid local structure renders in the 3D viewport",
+        "Failed file reads or parse errors show a clear non-blocking error state",
+        "Typecheck passes",
+        "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Load structures by PDB ID",
+      "description": "As a researcher, I want to load a public structure by PDB ID so that I can inspect known structures without manually downloading files.",
+      "acceptanceCriteria": [
+        "Add a PDB ID input flow in the viewer UI",
+        "Submitting a valid PDB ID calls loadPdbId",
+        "loadPdbId requests an RCSB-compatible structure download URL",
+        "Loaded PDB ID structure renders in the same Mol* viewport as local files",
+        "Invalid IDs or network failures show a clear non-blocking error state",
+        "Local file loading remains available and unchanged",
+        "Typecheck passes",
+        "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Support iPad touch camera gestures",
+      "description": "As a researcher, I want to rotate, pan, zoom, and focus the molecule with standard iPad gestures so that navigation feels natural without a mouse.",
+      "acceptanceCriteria": [
+        "One-finger drag rotates the molecule",
+        "Two-finger drag pans the view",
+        "Pinch gesture zooms in and out",
+        "Double tap calls focusSelection when an atom or residue is selected",
+        "Double tap does not trigger file loading, panel state changes, or toolbar actions",
+        "Typecheck passes",
+        "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Add floating representation toolbar",
+      "description": "As a researcher, I want one-tap representation controls so that I can switch between common molecular views while keeping the structure visible.",
+      "acceptanceCriteria": [
+        "Add a floating edge-aligned toolbar over the viewport",
+        "Toolbar includes Ribbon, Surface, and Stick representation actions",
+        "Toolbar can be collapsed or kept compact so it does not permanently consume viewport width",
+        "Tapping each representation action calls setRepresentation without reloading the structure",
+        "Toolbar controls remain usable in portrait and landscape orientations",
+        "Typecheck passes",
+        "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Add structural visibility toggles",
+      "description": "As a researcher, I want quick toggles for water, ligands, and disulfide bonds so that I can reduce visual clutter during inspection.",
+      "acceptanceCriteria": [
+        "Floating toolbar includes Water, Ligand, and Disulfide toggles",
+        "Each toggle calls toggleVisibility with the matching feature key",
+        "Toggling a feature updates the current Mol* view without a full structure reload",
+        "Toggling a missing feature category does not crash the app or viewer",
+        "Toggle state is reflected visually in the toolbar",
+        "Typecheck passes",
+        "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Show selection details in bottom sheet",
+      "description": "As a researcher, I want selected atom or residue details in a bottom sheet so that I can inspect identity data without leaving the 3D view.",
+      "acceptanceCriteria": [
+        "Add a bottom sheet overlay with collapsed and expanded states",
+        "Tapping a selectable atom or residue updates the current selection",
+        "Bottom sheet shows available selected item name, number, chain, and model data",
+        "Clearing selection resets the bottom sheet to its empty state",
+        "Bottom sheet does not permanently resize the viewport",
+        "Typecheck passes",
+        "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Highlight selected structure and dim context",
+      "description": "As a researcher, I want the selected atom or residue highlighted and surrounding structure dimmed so that the selected region is easy to find in complex molecules.",
+      "acceptanceCriteria": [
+        "Selected atom or residue is visually highlighted in the Mol* viewport",
+        "Non-selected structure is dimmed enough to distinguish the selection",
+        "clearSelection removes highlight and restores normal structure visibility",
+        "Highlight and dimming update when a different atom or residue is selected",
+        "Typecheck passes",
+        "Verify in browser using available Codex browser tooling, MCP browser tooling, or Playwright"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Document Apple Pencil follow-up release",
+      "description": "As a product team, I want Apple Pencil functionality captured as a follow-up release candidate so that the MVP remains focused while preserving the professional app direction.",
+      "acceptanceCriteria": [
+        "Add follow-up documentation for Pencil hover residue tooltip",
+        "Add follow-up documentation for Pencil-based distance and angle measurement",
+        "Add follow-up documentation for screenshot annotation and sharing",
+        "Documentation states that Apple Pencil support is not required for MVP completion",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
