@@ -6,6 +6,11 @@ struct MoleculeViewerView: View {
     @State private var isRepresentationToolbarExpanded = true
     @State private var pdbIdText = ""
     @State private var selectedRepresentation: MoleculeRepresentation = .ribbon
+    @State private var visibilityStates: [MoleculeVisibilityFeature: Bool] = [
+        .water: true,
+        .ligand: true,
+        .disulfide: true
+    ]
     @State private var statusMessage = "Ready for structure loading"
     @State private var localErrorMessage: String?
 
@@ -115,6 +120,23 @@ struct MoleculeViewerView: View {
                     .tint(selectedRepresentation == representation ? .blue : .white.opacity(0.28))
                     .foregroundStyle(.white)
                 }
+
+                Divider()
+                    .overlay(.white.opacity(0.28))
+
+                ForEach(MoleculeVisibilityFeature.allCases) { feature in
+                    Button {
+                        toggleVisibility(feature)
+                    } label: {
+                        Label(feature.title, systemImage: feature.systemImage)
+                            .frame(minWidth: 88, alignment: .leading)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(visibilityStates[feature, default: true] ? .green : .white.opacity(0.28))
+                    .foregroundStyle(.white)
+                    .accessibilityLabel("\(feature.title) visibility")
+                    .accessibilityValue(visibilityStates[feature, default: true] ? "Visible" : "Hidden")
+                }
             }
         }
         .padding(8)
@@ -152,6 +174,14 @@ struct MoleculeViewerView: View {
         localErrorMessage = nil
         bridge.setRepresentation(representation.rawValue)
     }
+
+    private func toggleVisibility(_ feature: MoleculeVisibilityFeature) {
+        let isVisible = !visibilityStates[feature, default: true]
+        visibilityStates[feature] = isVisible
+        localErrorMessage = nil
+        statusMessage = "\(feature.title) \(isVisible ? "shown" : "hidden")"
+        bridge.toggleVisibility(feature: feature.rawValue, isVisible: isVisible)
+    }
 }
 
 enum MoleculeRepresentation: String, CaseIterable, Identifiable {
@@ -182,6 +212,38 @@ enum MoleculeRepresentation: String, CaseIterable, Identifiable {
             "circle.hexagongrid"
         case .stick:
             "line.diagonal"
+        }
+    }
+}
+
+enum MoleculeVisibilityFeature: String, CaseIterable, Identifiable {
+    case water
+    case ligand
+    case disulfide
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .water:
+            "Water"
+        case .ligand:
+            "Ligand"
+        case .disulfide:
+            "Disulfide"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .water:
+            "drop"
+        case .ligand:
+            "hexagon"
+        case .disulfide:
+            "link"
         }
     }
 }

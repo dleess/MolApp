@@ -8,6 +8,7 @@
 - PDB ID loading should validate with `PdbIdentifier.normalized(...)` in native UI and route through `loadPdbId`; the viewer-side handler loads `https://files.rcsb.org/download/{PDB_ID}.cif` as `mmcif`.
 - Keep iPad camera gestures owned by Mol*/`viewer.html`: disable WKWebView scroll and pinch interception, keep `#molstar-host` at `touch-action: none`, and add custom gesture behavior only when Mol* does not already provide it.
 - Native viewport controls belong in `MoleculeViewerView` overlays and should call `MolStarBridge` commands directly; representation choices use `MoleculeRepresentation` raw values routed through `setRepresentation`.
+- Structural visibility feature keys belong in `MoleculeVisibilityFeature` and should be routed through `MolStarBridge.toggleVisibility` from native overlay controls.
 
 ## 2026-04-30 17:04:18 KST - US-001
 - Implemented a minimal native iPadOS SwiftUI scaffold named MolApp.
@@ -114,4 +115,16 @@
 - **Learnings for future iterations:**
   - Keep compact toolbars as overlays in `MoleculeViewerView` so they do not resize the WKWebView viewport.
   - Route representation commands through `MolStarBridge.setRepresentation` from native controls; the viewer-side handler already accepts the command without reloading structures.
+---
+## 2026-04-30 21:43:56 KST - US-010
+- Added Water, Ligand, and Disulfide visibility controls to the existing trailing floating toolbar.
+- Each control updates visible/hidden state in the toolbar and calls `MolStarBridge.toggleVisibility` with the matching feature key without reloading the structure.
+- Added a focused XCTest for the visibility feature-key contract.
+- Files changed: `MolApp/MoleculeViewerView.swift`, `MolAppTests/MolStarBridgeTests.swift`, `AGENTS.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' test CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: temporary Playwright with system Google Chrome opened `MolApp/Resources/viewer.html`; `toggleVisibility` for a missing feature category returned success, updated `window.molapp.visibility`, kept the viewer `ready`, retained one canvas, and reported no console or page errors.
+- Native simulator verification result: installed and launched `com.example.MolApp` on iPad Pro 13-inch, OS 26.4.1; Water, Ligand, and Disulfide visibility controls appeared in the trailing overlay, and tapping Water changed its accessibility value from `Visible` to `Hidden` while updating status to `Water hidden`.
+- **Learnings for future iterations:**
+  - Centralize visibility feature keys in `MoleculeVisibilityFeature` so toolbar labels, tests, and bridge payloads stay aligned.
+  - Visibility controls can share the representation toolbar container as long as the WKWebView remains the full-screen back layer.
 ---

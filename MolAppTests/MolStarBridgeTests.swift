@@ -54,4 +54,10 @@ final class MolStarBridgeTests: XCTestCase {
             XCTAssertEqual(error as? PdbIdentifierError, .invalid)
         }
     }
+
+    func testVisibilityFeatureKeysMatchBridgePayloadContract() {
+        XCTAssertEqual(MoleculeVisibilityFeature.water.rawValue, "water")
+        XCTAssertEqual(MoleculeVisibilityFeature.ligand.rawValue, "ligand")
+        XCTAssertEqual(MoleculeVisibilityFeature.disulfide.rawValue, "disulfide")
+    }
 }
