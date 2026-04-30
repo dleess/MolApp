@@ -69,3 +69,4 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - WKWebView viewer assets are bundled as Xcode target resources and loaded with `loadFileURL(_:allowingReadAccessTo:)`; `MolApp/Resources/viewer.html` is copied into the app bundle root as `viewer.html`.
 - Mol* viewer assets live under `MolApp/Resources/molstar` and are copied as a folder resource, so `viewer.html` should reference them with relative paths such as `molstar/molstar.js`.
 - `MolAppTests` is an XCTest target in the shared `MolApp` scheme; run the README build command with `test` instead of `build` when app code has test coverage.
+- Local structure imports are routed through `LocalStructureFileLoader`; keep accepted file extensions and Mol* data format strings there rather than duplicating them in SwiftUI views.

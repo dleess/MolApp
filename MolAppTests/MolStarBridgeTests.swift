@@ -27,4 +27,16 @@ final class MolStarBridgeTests: XCTestCase {
         XCTAssertFalse(result.success)
         XCTAssertEqual(result.error, "Unknown MolApp command: unknownCommand")
     }
+
+    func testLocalStructureFileFormatMapsSupportedExtensions() throws {
+        XCTAssertEqual(try LocalStructureFileLoader.format(for: URL(filePath: "/tmp/model.pdb")), "pdb")
+        XCTAssertEqual(try LocalStructureFileLoader.format(for: URL(filePath: "/tmp/model.cif")), "mmcif")
+        XCTAssertEqual(try LocalStructureFileLoader.format(for: URL(filePath: "/tmp/model.mmcif")), "mmcif")
+    }
+
+    func testLocalStructureFileFormatRejectsUnsupportedExtension() {
+        XCTAssertThrowsError(try LocalStructureFileLoader.format(for: URL(filePath: "/tmp/model.txt"))) { error in
+            XCTAssertEqual(error as? LocalStructureFileLoaderError, .unsupportedExtension("txt"))
+        }
+    }
 }
