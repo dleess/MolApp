@@ -1,0 +1,14 @@
+## Codebase Patterns
+- The iPadOS app builds through `MolApp.xcodeproj` with shared scheme `MolApp`; use the README `xcodebuild` command with `CODE_SIGNING_ALLOWED=NO` for simulator verification.
+
+## 2026-04-30 17:04:18 KST - US-001
+- Implemented a minimal native iPadOS SwiftUI scaffold named MolApp.
+- Added `MolAppApp` as the app entry point and routed launch into `MoleculeViewerView`.
+- Added a shared Xcode scheme and documented the simulator build command in `README.md`.
+- Files changed: `MolApp/MolAppApp.swift`, `MolApp/MoleculeViewerView.swift`, `MolApp.xcodeproj/project.pbxproj`, `MolApp.xcodeproj/xcshareddata/xcschemes/MolApp.xcscheme`, `README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' build CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: not applicable; US-001 is project scaffolding with no frontend browser surface.
+- **Learnings for future iterations:**
+  - The available iPad Pro 13-inch simulator runtime is reported by xcodebuild as `26.4.1`, even though the SDK path is `iPhoneSimulator26.4.sdk`.
+  - This repo did not previously contain an app project, so future UI stories should extend the new `MoleculeViewerView` rather than adding a separate root.
+---
