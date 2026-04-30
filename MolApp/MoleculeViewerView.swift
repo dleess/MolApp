@@ -3,6 +3,7 @@ import SwiftUI
 struct MoleculeViewerView: View {
     @StateObject private var bridge = MolStarBridge()
     @State private var isFileImporterPresented = false
+    @State private var pdbIdText = ""
     @State private var statusMessage = "Ready for structure loading"
     @State private var localErrorMessage: String?
 
@@ -27,6 +28,24 @@ struct MoleculeViewerView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
 
+                HStack(spacing: 8) {
+                    TextField("PDB ID", text: $pdbIdText)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 92)
+                        .onSubmit(loadPdbId)
+
+                    Button {
+                        loadPdbId()
+                    } label: {
+                        Label("Load PDB", systemImage: "square.and.arrow.down")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                    .disabled(pdbIdText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.footnote)
@@ -46,6 +65,13 @@ struct MoleculeViewerView: View {
         )
         .onReceive(bridge.$lastErrorMessage) { message in
             localErrorMessage = message
+        }
+        .onReceive(bridge.$lastCommandResult) { result in
+            guard let result, result.success else { return }
+
+            if result.command == .loadPdbId {
+                statusMessage = "Loaded \(PdbIdentifier.displayName(from: pdbIdText))"
+            }
         }
     }
 
@@ -68,6 +94,41 @@ struct MoleculeViewerView: View {
         } catch {
             localErrorMessage = error.localizedDescription
         }
+    }
+
+    private func loadPdbId() {
+        do {
+            let pdbId = try PdbIdentifier.normalized(pdbIdText)
+            pdbIdText = pdbId
+            statusMessage = "Loading \(pdbId)"
+            localErrorMessage = nil
+            bridge.loadPdbId(pdbId)
+        } catch {
+            localErrorMessage = error.localizedDescription
+        }
+    }
+}
+
+enum PdbIdentifier {
+    static func normalized(_ rawValue: String) throws -> String {
+        let pdbId = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard pdbId.range(of: #"^[A-Z0-9]{4}$"#, options: .regularExpression) != nil else {
+            throw PdbIdentifierError.invalid
+        }
+
+        return pdbId
+    }
+
+    static func displayName(from rawValue: String) -> String {
+        (try? normalized(rawValue)) ?? rawValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+}
+
+enum PdbIdentifierError: LocalizedError, Equatable {
+    case invalid
+
+    var errorDescription: String? {
+        "Enter a 4-character PDB ID."
     }
 }
 

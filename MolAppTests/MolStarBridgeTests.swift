@@ -39,4 +39,19 @@ final class MolStarBridgeTests: XCTestCase {
             XCTAssertEqual(error as? LocalStructureFileLoaderError, .unsupportedExtension("txt"))
         }
     }
+
+    func testPdbIdentifierNormalizesValidInput() throws {
+        XCTAssertEqual(try PdbIdentifier.normalized(" 1abc "), "1ABC")
+        XCTAssertEqual(try PdbIdentifier.normalized("7tim"), "7TIM")
+    }
+
+    func testPdbIdentifierRejectsInvalidInput() {
+        XCTAssertThrowsError(try PdbIdentifier.normalized("abc")) { error in
+            XCTAssertEqual(error as? PdbIdentifierError, .invalid)
+        }
+
+        XCTAssertThrowsError(try PdbIdentifier.normalized("12-4")) { error in
+            XCTAssertEqual(error as? PdbIdentifierError, .invalid)
+        }
+    }
 }

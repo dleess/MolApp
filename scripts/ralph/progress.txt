@@ -5,6 +5,7 @@
 - Mol* assets are copied as a `MolApp/Resources/molstar` folder resource, so `viewer.html` should load them with bundle-root-relative paths like `molstar/molstar.js` and `molstar/molstar.css`.
 - `MolAppTests` is an XCTest target wired into the shared `MolApp` scheme; use `xcodebuild ... test CODE_SIGNING_ALLOWED=NO` for test verification when app code has test coverage.
 - Local file import extension allowlists and Mol* data format mapping live in `LocalStructureFileLoader`; UI code should call that helper rather than duplicating `pdb`/`mmcif` handling.
+- PDB ID loading should validate with `PdbIdentifier.normalized(...)` in native UI and route through `loadPdbId`; the viewer-side handler loads `https://files.rcsb.org/download/{PDB_ID}.cif` as `mmcif`.
 
 ## 2026-04-30 17:04:18 KST - US-001
 - Implemented a minimal native iPadOS SwiftUI scaffold named MolApp.
@@ -74,4 +75,18 @@
   - `fileImporter` can use `UTType(filenameExtension:)` for PDB/mmCIF types without adding Info.plist document type declarations at this stage.
   - Security-scoped access should wrap file reads from the Files picker, even though simulator-local URLs may not require it.
   - Mol* accepts local PDB payloads through the existing `viewer.loadStructureFromData(payload.data, "pdb", ...)` path.
+---
+## 2026-04-30 21:32:48 KST - US-007
+- Added a compact native PDB ID input flow beside the existing local file picker.
+- Valid PDB IDs are trimmed, uppercased, validated as 4 alphanumeric characters, and sent through `MolStarBridge.loadPdbId`.
+- Updated the Mol* viewer command handler to load RCSB-compatible `https://files.rcsb.org/download/{PDB_ID}.cif` URLs as `mmcif` and continue reporting bridge success or failure.
+- Added focused XCTest coverage for PDB ID normalization and invalid input rejection.
+- Files changed: `MolApp/MoleculeViewerView.swift`, `MolApp/Resources/viewer.html`, `MolAppTests/MolStarBridgeTests.swift`, `AGENTS.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks run and results: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' test CODE_SIGNING_ALLOWED=NO` passed.
+- Browser verification result: temporary Playwright with system Google Chrome opened `MolApp/Resources/viewer.html`; `loadPdbId` with `1abc` called `loadStructureFromUrl("https://files.rcsb.org/download/1ABC.cif", "mmcif", false, { label: "1ABC" })`, returned a success bridge message, and the viewer stayed ready.
+- Native simulator verification result: installed and launched `com.example.MolApp` on iPad Pro 13-inch, OS 26.4.1; the PDB ID input appeared in the overlay, typing `1abc` normalized to `1ABC`, `Load PDB` enabled, and submitting updated status to `Loaded 1ABC`.
+- **Learnings for future iterations:**
+  - Keep native PDB ID validation in `PdbIdentifier` so SwiftUI views and tests share the same normalization rules.
+  - Prefer explicit RCSB `.cif` URLs in the JS handler when acceptance criteria require a visible download URL, rather than Mol* provider shortcuts.
+  - The PDB ID input should remain in the overlay with local file loading available in the same control cluster.
 ---

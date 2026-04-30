@@ -123,7 +123,11 @@
             throw new Error('loadPdbId requires a 4-character PDB ID.');
           }
 
-          await window.molapp.viewer.loadPdb(pdbId.toUpperCase());
+          const normalizedPdbId = pdbId.toUpperCase();
+          const url = 'https://files.rcsb.org/download/' + normalizedPdbId + '.cif';
+          await window.molapp.viewer.loadStructureFromUrl(url, 'mmcif', false, {
+            label: normalizedPdbId
+          });
         },
         setRepresentation: async function (payload) {
           window.molapp.representation = payload.representation || null;
