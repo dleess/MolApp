@@ -202,11 +202,14 @@ struct MoleculeViewerView: View {
                 .foregroundStyle(.white.opacity(0.6))
             
             TextField("Enter command (e.g. load 1crn, repr surface)...", text: $commandText)
-                .textFieldStyle(.plain)
-                .foregroundStyle(.white)
+                .textFieldStyle(.roundedBorder)
+                .foregroundStyle(.primary)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
+                .keyboardType(.asciiCapable)
+                .submitLabel(.go)
                 .onSubmit(executeCommand)
+                .frame(minHeight: 36)
             
             if !commandText.isEmpty {
                 Button {
@@ -216,6 +219,16 @@ struct MoleculeViewerView: View {
                         .foregroundStyle(.white.opacity(0.6))
                 }
             }
+
+            Button {
+                executeCommand()
+            } label: {
+                Label("Run command", systemImage: "arrow.up.circle.fill")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .white.opacity(0.3) : .blue)
+            }
+            .disabled(commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .accessibilityLabel("Run command")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
