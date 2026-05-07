@@ -27,8 +27,22 @@ struct MolStarWebView: UIViewRepresentable {
         webView.scrollView.bounces = false
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.scrollView.pinchGestureRecognizer?.isEnabled = false
         webView.allowsBackForwardNavigationGestures = false
+
+        let hoverRecognizer = UIHoverGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleHover(_:))
+        )
+        webView.addGestureRecognizer(hoverRecognizer)
+
+        let pinchRecognizer = UIPinchGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePinch(_:))
+        )
+        pinchRecognizer.delegate = context.coordinator
+        webView.addGestureRecognizer(pinchRecognizer)
+        context.coordinator.attach(webView: webView)
+
         bridge.attach(webView: webView)
         loadViewerHTML(in: webView)
         return webView
@@ -61,15 +75,56 @@ struct MolStarWebView: UIViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "molapp")
     }
 
-    final class Coordinator: NSObject, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKScriptMessageHandler, UIGestureRecognizerDelegate {
         private let bridge: MolStarBridge
+        private weak var webView: WKWebView?
 
         init(bridge: MolStarBridge) {
             self.bridge = bridge
         }
 
+        func attach(webView: WKWebView) {
+            self.webView = webView
+        }
+
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             bridge.userContentController(userContentController, didReceive: message)
+        }
+
+        @objc func handleHover(_ gesture: UIHoverGestureRecognizer) {
+            guard let webView else { return }
+            switch gesture.state {
+            case .began, .changed:
+                let pt = gesture.location(in: webView)
+                let js = "window.molapp?.handlePencilHover?.(\(pt.x), \(pt.y));"
+                webView.evaluateJavaScript(js, completionHandler: nil)
+            case .ended, .cancelled:
+                webView.evaluateJavaScript("window.molapp?.handlePencilHoverEnd?.();", completionHandler: nil)
+            default:
+                break
+            }
+        }
+
+        @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            guard let webView else { return }
+
+            switch gesture.state {
+            case .began, .changed:
+                let scale = gesture.scale
+                let pt = gesture.location(in: webView)
+                let js = "window.molapp?.handleNativePinch?.(\(scale), \(pt.x), \(pt.y));"
+                webView.evaluateJavaScript(js, completionHandler: nil)
+                gesture.scale = 1
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
         }
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import WebKit
 
 enum MolStarCommandName: String, Codable {
@@ -9,6 +10,9 @@ enum MolStarCommandName: String, Codable {
     case focusSelection
     case setSelection
     case clearSelection
+    case setObjectVisibility
+    case setObjectRepresentation
+    case setObjectColor
 }
 
 struct MolStarCommandResult: Decodable {
@@ -38,6 +42,61 @@ struct MolStarCommandResult: Decodable {
     }
 }
 
+enum ObjectRepresentation: String, Codable, CaseIterable, Identifiable {
+    case ribbon
+    case surface
+    case stick
+    case ballAndStick = "ballAndStick"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .ribbon:       "Ribbon"
+        case .surface:      "Surface"
+        case .stick:        "Stick"
+        case .ballAndStick: "Ball+Stick"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .ribbon:       "Rib"
+        case .surface:      "Sur"
+        case .stick:        "Stk"
+        case .ballAndStick: "B+S"
+        }
+    }
+}
+
+struct MolAppObject: Identifiable, Codable, Equatable {
+    var id: String { name }
+    let name: String
+
+    enum ObjectType: String, Codable { case structure, selection }
+    let type: ObjectType
+
+    var isVisible: Bool = true
+    var representation: ObjectRepresentation = .ribbon
+    var colorHex: String? = nil
+
+    var swiftUIColor: Color {
+        guard let hex = colorHex else { return .white.opacity(0.3) }
+        return Color(hex: hex) ?? .white.opacity(0.3)
+    }
+}
+
+struct SelectionAST: Codable, Equatable {
+    enum Kind: String, Codable {
+        case and, or, not, chain, residue, residueRange, residueName, atom, model
+    }
+    let kind: Kind
+    var left: [SelectionAST]?
+    var right: [SelectionAST]?
+    var operand: [SelectionAST]?
+    let value: String?
+}
+
 struct MoleculeSelection: Codable, Equatable {
     let type: String
     let label: String?
@@ -45,15 +104,36 @@ struct MoleculeSelection: Codable, Equatable {
     let chain: String?
     let residueNumber: Int?
     let atomName: String?
+    let ast: SelectionAST?
+
+    init(
+        type: String,
+        label: String? = nil,
+        model: Int? = nil,
+        chain: String? = nil,
+        residueNumber: Int? = nil,
+        atomName: String? = nil,
+        ast: SelectionAST? = nil
+    ) {
+        self.type = type
+        self.label = label
+        self.model = model
+        self.chain = chain
+        self.residueNumber = residueNumber
+        self.atomName = atomName
+        self.ast = ast
+    }
 }
 
 final class MolStarBridge: NSObject, ObservableObject {
     @Published private(set) var lastCommandResult: MolStarCommandResult?
     @Published private(set) var lastErrorMessage: String?
     @Published private(set) var currentSelection: MoleculeSelection?
+    @Published private(set) var objects: [MolAppObject] = []
 
     private weak var webView: WKWebView?
     private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
 
     func attach(webView: WKWebView) {
         self.webView = webView
@@ -87,6 +167,35 @@ final class MolStarBridge: NSObject, ObservableObject {
         send(.clearSelection, payload: EmptyPayload())
     }
 
+    func addObject(_ object: MolAppObject) {
+        if let idx = objects.firstIndex(where: { $0.name == object.name }) {
+            objects[idx] = object
+        } else {
+            objects.append(object)
+        }
+    }
+
+    func setObjectVisibility(name: String, isVisible: Bool) {
+        send(.setObjectVisibility, payload: ObjectVisibilityPayload(name: name, isVisible: isVisible))
+        updateObject(name: name) { $0.isVisible = isVisible }
+    }
+
+    func setObjectRepresentation(name: String, representation: ObjectRepresentation) {
+        send(.setObjectRepresentation, payload: ObjectRepresentationPayload(name: name, representation: representation.rawValue))
+        updateObject(name: name) { $0.representation = representation }
+    }
+
+    func setObjectColor(name: String, colorHex: String?) {
+        send(.setObjectColor, payload: ObjectColorPayload(name: name, colorHex: colorHex))
+        updateObject(name: name) { $0.colorHex = colorHex }
+    }
+
+    private func updateObject(name: String, update: (inout MolAppObject) -> Void) {
+        if let idx = objects.firstIndex(where: { $0.name == name }) {
+            update(&objects[idx])
+        }
+    }
+
     private func send<Payload: Encodable>(_ command: MolStarCommandName, payload: Payload) {
         do {
             let envelope = CommandEnvelope(id: UUID().uuidString, command: command, payload: payload)
@@ -108,14 +217,14 @@ final class MolStarBridge: NSObject, ObservableObject {
     }
 
     func receive(messageBody: Any) throws {
-        if let event = try MolStarSelectionEvent(messageBody: messageBody) {
-            currentSelection = event.selection
+        let data = try JSONSerialization.data(withJSONObject: messageBody)
+
+        if let dict = messageBody as? [String: Any], dict["event"] as? String == "selectionChanged" {
+            currentSelection = try decoder.decode(MolStarSelectionEvent.self, from: data).selection
             return
         }
 
-        let data = try JSONSerialization.data(withJSONObject: messageBody)
-        let result = try JSONDecoder().decode(MolStarCommandResult.self, from: data)
-        receive(result: result)
+        receive(result: try decoder.decode(MolStarCommandResult.self, from: data))
     }
 }
 
@@ -134,16 +243,6 @@ extension MolStarBridge: WKScriptMessageHandler {
 private struct MolStarSelectionEvent: Decodable {
     let event: String
     let selection: MoleculeSelection?
-
-    init?(messageBody: Any) throws {
-        guard let object = messageBody as? [String: Any],
-              object["event"] as? String == "selectionChanged" else {
-            return nil
-        }
-
-        let data = try JSONSerialization.data(withJSONObject: object)
-        self = try JSONDecoder().decode(MolStarSelectionEvent.self, from: data)
-    }
 }
 
 private struct CommandEnvelope<Payload: Encodable>: Encodable {
@@ -171,4 +270,31 @@ private struct RepresentationPayload: Encodable {
 private struct VisibilityPayload: Encodable {
     let feature: String
     let isVisible: Bool
+}
+
+private struct ObjectVisibilityPayload: Encodable {
+    let name: String
+    let isVisible: Bool
+}
+
+private struct ObjectRepresentationPayload: Encodable {
+    let name: String
+    let representation: String
+}
+
+private struct ObjectColorPayload: Encodable {
+    let name: String
+    let colorHex: String?
+}
+
+extension Color {
+    init?(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        guard Scanner(string: hex).scanHexInt64(&int) else { return nil }
+        let r = Double((int >> 16) & 0xFF) / 255
+        let g = Double((int >> 8) & 0xFF) / 255
+        let b = Double(int & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
+    }
 }

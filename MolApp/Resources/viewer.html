@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <title>MolApp Viewer</title>
   <link rel="stylesheet" href="molstar/molstar.css">
   <style>
@@ -95,6 +95,59 @@
         }
       }
 
+      function structureCount() {
+        if (!window.molapp || !window.molapp.viewer) {
+          return 0;
+        }
+
+        return window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures.length;
+      }
+
+      async function resetCamera() {
+        const canvas = window.molapp.viewer.plugin.canvas3d;
+        if (canvas) {
+          canvas.requestCameraReset({ durationMs: 250 });
+        }
+      }
+
+      async function loadStructureAndFocus(loadStructure) {
+        const beforeCount = structureCount();
+        clearSelectionVisuals();
+        await loadStructure();
+        await new Promise(function (resolve) {
+          requestAnimationFrame(function () {
+            requestAnimationFrame(resolve);
+          });
+        });
+
+        if (structureCount() <= beforeCount) {
+          throw new Error('Structure load completed, but no structure was added to the viewer.');
+        }
+
+        await resetCamera();
+      }
+
+      async function applyRepresentationPreset(representation) {
+        const presetByRepresentation = {
+          ribbon: 'preset-structure-representation-polymer-cartoon',
+          surface: 'preset-structure-representation-molecular-surface',
+          stick: 'preset-structure-representation-atomic-detail'
+        };
+        const preset = presetByRepresentation[representation];
+        if (!preset) {
+          throw new Error('Unknown representation: ' + representation);
+        }
+
+        const structures = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
+        if (!structures.length) {
+          throw new Error('Load a structure before changing representation.');
+        }
+
+        await window.molapp.viewer.plugin.managers.structure.component.applyPreset(structures, preset);
+        window.molapp.representation = representation;
+        await resetCamera();
+      }
+
       function clearSelectionVisuals() {
         if (!window.molapp || !window.molapp.viewer) {
           return;
@@ -127,12 +180,82 @@
 
       function setMolAppSelection(selection, loci) {
         window.molapp.selection = selection;
+        window.molapp.selectionLoci = loci;
         if (selection && loci) {
           applySelectionVisuals(loci);
         } else if (!selection) {
           clearSelectionVisuals();
         }
         postSelectionChanged(selection);
+      }
+
+      function queryFromAST(ast) {
+        if (!ast) return null;
+
+        const structure = window.molstar.lib.structure;
+        const queries = structure.Queries;
+        const props = structure.StructureProperties;
+        const atoms = queries.generators.atoms;
+
+        switch (ast.kind) {
+          case 'and':
+            return queries.combinators.intersect([queryFromAST(ast.left[0]), queryFromAST(ast.right[0])]);
+          case 'or':
+            return queries.combinators.merge([queryFromAST(ast.left[0]), queryFromAST(ast.right[0])]);
+          case 'not':
+            return queries.modifiers.exceptBy(queries.generators.all, queryFromAST(ast.operand[0]));
+          case 'chain':
+            return atoms({
+              chainTest: function (ctx) {
+                const loc = ctx.element;
+                return props.chain.label_asym_id(loc) === ast.value || props.chain.auth_asym_id(loc) === ast.value;
+              }
+            });
+          case 'residue':
+            return atoms({
+              residueTest: function (ctx) {
+                const loc = ctx.element;
+                const value = parseInt(ast.value, 10);
+                return props.residue.auth_seq_id(loc) === value || props.residue.label_seq_id(loc) === value;
+              }
+            });
+          case 'atom':
+            return atoms({
+              atomTest: function (ctx) {
+                const loc = ctx.element;
+                return props.atom.label_atom_id(loc) === ast.value || props.atom.auth_atom_id(loc) === ast.value;
+              }
+            });
+          case 'residueRange': {
+            const rangeParts = ast.value.split('-');
+            const rangeStart = parseInt(rangeParts[0], 10);
+            const rangeEnd = parseInt(rangeParts[1], 10);
+            return atoms({
+              residueTest: function (ctx) {
+                const loc = ctx.element;
+                const value = props.residue.auth_seq_id(loc) || props.residue.label_seq_id(loc);
+                return value >= rangeStart && value <= rangeEnd;
+              }
+            });
+          }
+          case 'residueName':
+            return atoms({
+              residueTest: function (ctx) {
+                const loc = ctx.element;
+                const value = ast.value.toUpperCase();
+                return props.residue.label_comp_id(loc) === value || props.residue.auth_comp_id(loc) === value;
+              }
+            });
+          case 'model':
+            return atoms({
+              atomTest: function (ctx) {
+                const loc = ctx.element;
+                return props.unit.model_num(loc) === parseInt(ast.value, 10);
+              }
+            });
+          default:
+            return null;
+        }
       }
 
       function selectionFromLoci(loci) {
@@ -192,10 +315,17 @@
             throw new Error('loadLocalStructure requires data and format.');
           }
 
-          clearSelectionVisuals();
-          await window.molapp.viewer.loadStructureFromData(payload.data, payload.format, {
-            dataLabel: payload.label || 'Local structure'
+          const label = payload.label || 'Local structure';
+          await loadStructureAndFocus(function () {
+            return window.molapp.viewer.loadStructureFromData(payload.data, payload.format, {
+              dataLabel: label
+            });
           });
+          const structures = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
+          window.molapp.objects[label] = {
+            type: 'structure',
+            structureRef: structures[structures.length - 1]
+          };
         },
         loadPdbId: async function (payload) {
           const pdbId = String(payload.pdbId || '').trim();
@@ -205,30 +335,344 @@
 
           const normalizedPdbId = pdbId.toUpperCase();
           const url = 'https://files.rcsb.org/download/' + normalizedPdbId + '.cif';
-          clearSelectionVisuals();
-          await window.molapp.viewer.loadStructureFromUrl(url, 'mmcif', false, {
-            label: normalizedPdbId
+          await loadStructureAndFocus(function () {
+            return window.molapp.viewer.loadStructureFromUrl(url, 'mmcif', false, {
+              label: normalizedPdbId
+            });
           });
+          const structures = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
+          window.molapp.objects[normalizedPdbId] = {
+            type: 'structure',
+            structureRef: structures[structures.length - 1]
+          };
         },
         setRepresentation: async function (payload) {
-          window.molapp.representation = payload.representation || null;
+          await applyRepresentationPreset(payload.representation || '');
         },
         toggleVisibility: async function (payload) {
-          window.molapp.visibility[payload.feature] = Boolean(payload.isVisible);
+          const feature = payload.feature; // 'water' or 'ligand'
+          const isVisible = Boolean(payload.isVisible);
+          window.molapp.visibility[feature] = isVisible;
+
+          if (!window.molapp || !window.molapp.viewer) return;
+
+          const plugin = window.molapp.viewer.plugin;
+          const structures = plugin.managers.structure.hierarchy.current.structures;
+
+          for (const s of structures) {
+            const components = s.components.filter(c => {
+              // Mol* standard presets use these tags for water and ligand components
+              const tags = c.cell.obj.tags;
+              return tags && tags.includes(feature);
+            });
+
+            if (components.length > 0) {
+              // If we want to force a state rather than just toggle, we can check current state
+              // components[0].cell.state.isHidden
+              const currentHidden = components[0].cell.state.isHidden;
+              if (currentHidden === isVisible) {
+                plugin.managers.structure.component.toggleVisibility(components);
+              }
+            }
+          }
         },
         focusSelection: async function () {
-          const canvas = window.molapp.viewer.plugin.canvas3d;
-          if (canvas) {
-            canvas.requestCameraReset({ durationMs: 250 });
+          const plugin = window.molapp.viewer.plugin;
+          const loci = window.molapp.selectionLoci;
+          if (loci) {
+            plugin.managers.camera.focusLoci(loci);
+          } else {
+            await resetCamera();
           }
         },
         setSelection: async function (payload) {
-          setMolAppSelection(payload);
+          if (!payload || !payload.ast) {
+            setMolAppSelection(payload);
+            return;
+          }
+
+          const plugin = window.molapp.viewer.plugin;
+          const structures = plugin.managers.structure.hierarchy.current.structures;
+
+          if (structures.length === 0) {
+            setMolAppSelection(payload);
+            return;
+          }
+
+          // Step 1: loci 계산 — 실패 시 조기 종료
+          let loci, query, bundle;
+          try {
+            const structure = structures[0].cell.obj.data;
+            query = queryFromAST(payload.ast);
+            loci = window.molstar.lib.structure.StructureElement.Loci.fromQuery(structure, query);
+            bundle = window.molstar.lib.structure.StructureElement.Bundle.fromLoci(loci);
+          } catch (error) {
+            console.error('Selection query failed:', error);
+            setMolAppSelection(payload);
+            return;
+          }
+
+          // Step 2: loci 비어있으면 dim 방지 — empty loci로 selectOnly 호출 시 뷰포트 흑화
+          // StructureElement는 optional chaining으로 안전하게 접근
+          const StructElem = window.molstar?.lib?.structure?.StructureElement;
+          const isLociEmpty = !loci ||
+            (StructElem && StructElem.Loci.is(loci) && StructElem.Loci.isEmpty(loci));
+          if (isLociEmpty) {
+            clearSelectionVisuals();
+            postSelectionChanged(payload);
+            return;
+          }
+
+          // Step 2b: named expression selection vs ad-hoc selection
+          // Named selections render via dedicated components (no marker overlay → avoids
+          // viewport-wide highlight wash-out / black screen on broad selections).
+          const colonIdx = payload.label ? payload.label.indexOf(':') : -1;
+          const selName = colonIdx > 0 ? payload.label.slice(0, colonIdx).trim() : null;
+
+          if (!selName) {
+            setMolAppSelection(payload, loci);
+            return;
+          }
+
+          // Track metadata + selection state without applying highlight/select markers.
+          window.molapp.selection = payload;
+          window.molapp.selectionLoci = loci;
+          clearSelectionVisuals();
+          postSelectionChanged(payload);
+
+          try {
+            await removeSelectionComponent(selName);
+            const compSelector = await plugin.builders.structure.tryCreateComponent(
+              structures[0].cell,
+              { type: { name: 'bundle', params: bundle }, nullIfEmpty: true, label: selName },
+              selName
+            );
+            if (compSelector?.cell) {
+              await plugin.builders.structure.representation.addRepresentation(
+                compSelector.cell,
+                {
+                  type: 'cartoon',
+                  color: 'uniform',
+                  colorParams: { value: 0x4488FF }
+                }
+              );
+              window.molapp.objects[selName] = {
+                type: 'selection',
+                loci,
+                bundle,
+                colorHex: null,
+                componentRef: compSelector.ref
+              };
+            } else {
+              window.molapp.objects[selName] = { type: 'selection', loci, bundle, colorHex: null, componentRef: null };
+            }
+          } catch (componentError) {
+            console.error('[MolApp] Selection component creation failed:', componentError);
+            const errMsg = componentError && componentError.message ? componentError.message : String(componentError);
+            status.classList.add('viewer-status--error');
+            status.hidden = false;
+            statusMessage.textContent = 'Selection rendering failed: ' + errMsg;
+            setTimeout(() => { status.hidden = true; }, 5000);
+            window.molapp.objects[selName] = { type: 'selection', loci, bundle, colorHex: null, componentRef: null };
+          }
         },
         clearSelection: async function () {
           setMolAppSelection(null);
+        },
+
+        setObjectVisibility: async function (payload) {
+          const { name, isVisible } = payload;
+          const obj = window.molapp.objects[name];
+          if (!obj) return;
+
+          const plugin = window.molapp.viewer.plugin;
+
+          if (obj.type === 'structure') {
+            const target = obj.structureRef;
+            if (!target) return;
+            const isCurrentlyHidden = target.cell.state.isHidden;
+            if (Boolean(isCurrentlyHidden) === Boolean(isVisible)) {
+              plugin.managers.structure.hierarchy.toggleVisibility([target]);
+            }
+          } else if (obj.type === 'selection') {
+            const comp = findSelectionComponent(name);
+            if (comp) {
+              const isCurrentlyHidden = comp.cell.state.isHidden;
+              if (Boolean(isCurrentlyHidden) === Boolean(isVisible)) {
+                plugin.managers.structure.component.toggleVisibility([comp]);
+              }
+            }
+          }
+        },
+
+        setObjectRepresentation: async function (payload) {
+          const { name, representation } = payload;
+          const obj = window.molapp.objects[name];
+          if (!obj) return;
+
+          const plugin = window.molapp.viewer.plugin;
+
+          if (obj.type === 'structure') {
+            const presetMap = {
+              ribbon:       'preset-structure-representation-polymer-cartoon',
+              surface:      'preset-structure-representation-molecular-surface',
+              stick:        'preset-structure-representation-atomic-detail',
+              ballAndStick: 'preset-structure-representation-atomic-detail'
+            };
+            const preset = presetMap[representation];
+            if (!preset) throw new Error('Unknown representation: ' + representation);
+            const target = obj.structureRef;
+            if (!target) return;
+            await plugin.managers.structure.component.applyPreset([target], preset);
+          } else if (obj.type === 'selection' && obj.loci) {
+            const structures = plugin.managers.structure.hierarchy.current.structures;
+            if (!structures.length) return;
+            const reprTypeMap = {
+              ribbon:       'cartoon',
+              surface:      'molecular-surface',
+              stick:        'ball-and-stick',
+              ballAndStick: 'ball-and-stick'
+            };
+            const reprType = reprTypeMap[representation] || 'cartoon';
+            if (obj.bundle) {
+              let comp = findSelectionComponent(name);
+              if (!comp) {
+                const compSelector = await plugin.builders.structure.tryCreateComponent(
+                  structures[0].cell,
+                  { type: { name: 'bundle', params: obj.bundle }, nullIfEmpty: true, label: name },
+                  name
+                );
+                comp = compSelector || null;
+              }
+
+              if (comp?.cell) {
+                await clearComponentRepresentations(comp);
+                const colorHex = obj.colorHex || null;
+                const colorVal = colorHex ? hexToMolStarColor(colorHex) : 0x4488FF;
+                await plugin.builders.structure.representation.addRepresentation(
+                  comp.cell,
+                  {
+                    type: reprType,
+                    color: 'uniform',
+                    colorParams: { value: colorVal }
+                  }
+                );
+                obj.componentRef = comp.ref || comp.cell.transform.ref;
+              } else {
+                obj.componentRef = null;
+              }
+            }
+          }
+        },
+
+        setObjectColor: async function (payload) {
+          const { name, colorHex } = payload;
+          const obj = window.molapp.objects[name];
+          if (!obj) return;
+
+          const plugin = window.molapp.viewer.plugin;
+          const theme = colorHex
+            ? { color: 'uniform', colorParams: { value: hexToMolStarColor(colorHex) } }
+            : { color: 'chain-id', colorParams: {} };
+
+          if (obj.type === 'structure') {
+            const target = obj.structureRef;
+            if (!target) return;
+            await plugin.managers.structure.component.updateRepresentationsTheme(
+              target.components, theme
+            );
+          } else if (obj.type === 'selection') {
+            const comp = findSelectionComponent(name);
+            if (comp) {
+              await plugin.managers.structure.component.updateRepresentationsTheme([comp], theme);
+            }
+          }
+          // Track colorHex for repr-change reapplication
+          if (window.molapp.objects[name]) {
+            window.molapp.objects[name].colorHex = colorHex;
+          }
         }
       };
+
+      function hexToMolStarColor(hex) {
+        return parseInt(hex.replace('#', ''), 16);
+      }
+
+      function handlePencilHover(x, y) {
+        const plugin = window.molapp?.viewer?.plugin;
+        if (!plugin?.canvas3d) return;
+        const canvas = plugin.canvas3d.webgl.gl.canvas;
+        const rect = canvas.getBoundingClientRect();
+        canvas.dispatchEvent(new PointerEvent('pointermove', {
+          clientX: rect.left + x,
+          clientY: rect.top + y,
+          pointerType: 'pen',
+          bubbles: true,
+          cancelable: true,
+          isPrimary: true
+        }));
+      }
+
+      function handlePencilHoverEnd() {
+        const plugin = window.molapp?.viewer?.plugin;
+        if (!plugin?.canvas3d) return;
+        const canvas = plugin.canvas3d.webgl.gl.canvas;
+        canvas.dispatchEvent(new PointerEvent('pointerleave', {
+          pointerType: 'pen',
+          bubbles: true
+        }));
+        plugin.managers.interactivity.lociHighlights.clearHighlights();
+      }
+
+      function handleNativePinch(scale, x, y) {
+        const plugin = window.molapp?.viewer?.plugin;
+        if (!plugin?.canvas3d || !Number.isFinite(scale) || scale <= 0) return;
+
+        const canvas = plugin.canvas3d.webgl.gl.canvas;
+        const rect = canvas.getBoundingClientRect();
+        const deltaY = (1 - scale) * 360;
+        canvas.dispatchEvent(new WheelEvent('wheel', {
+          deltaY,
+          deltaMode: 0,
+          clientX: rect.left + x,
+          clientY: rect.top + y,
+          bubbles: true,
+          cancelable: true
+        }));
+      }
+
+      function findSelectionComponent(name) {
+        const plugin = window.molapp.viewer.plugin;
+        const structures = plugin.managers.structure.hierarchy.current.structures;
+        // tryCreateComponent stores its key under the tag `structure-component-${key}`.
+        const tag = 'structure-component-' + name;
+        const stored = window.molapp.objects && window.molapp.objects[name];
+        const ref = stored && stored.componentRef;
+        for (const s of structures) {
+          for (const c of (s.components || [])) {
+            const cellRef = c.cell.transform.ref;
+            const cellTags = c.cell.transform.tags;
+            if ((ref && cellRef === ref) || (Array.isArray(cellTags) && cellTags.includes(tag))) {
+              return c;
+            }
+          }
+        }
+        return null;
+      }
+
+      async function removeSelectionComponent(name) {
+        const comp = findSelectionComponent(name);
+        if (comp) {
+          await window.molapp.viewer.plugin.state.data.build().delete(comp.cell.transform.ref).commit();
+        }
+      }
+
+      async function clearComponentRepresentations(comp) {
+        if (!comp || !comp.representations || comp.representations.length === 0) {
+          return;
+        }
+        await window.molapp.viewer.plugin.managers.structure.component.removeRepresentations([comp]);
+      }
 
       function bindSelectionUpdates(viewer) {
         viewer.plugin.behaviors.interaction.click.subscribe(function (event) {
@@ -299,9 +743,13 @@
         window.molapp = {
           viewer,
           handleNativeCommand,
+          handlePencilHover,
+          handlePencilHoverEnd,
+          handleNativePinch,
           representation: null,
           visibility: {},
           selection: null,
+          objects: {},
           selectionVisualState: {
             selected: false,
             contextDimmed: false
