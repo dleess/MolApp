@@ -23,6 +23,21 @@ final class MolStarBridgeTests: XCTestCase {
                 case .success(let result):
                     XCTAssertEqual(result.pinchType, "function")
 
+                    XCTAssertEqual(result.globalResults["surface"]?.containsRepresentation("molecular-surface"), true)
+                    XCTAssertEqual(result.globalResults["ribbon"]?.containsRepresentation("cartoon"), true)
+                    XCTAssertEqual(result.globalResults["ribbon"]?.containsRepresentation("molecular-surface"), false)
+
+                    XCTAssertEqual(result.objectResults["surface"]?.containsRepresentation("molecular-surface"), true)
+                    XCTAssertEqual(result.objectResults["ribbon"]?.containsRepresentation("cartoon"), true)
+                    XCTAssertEqual(result.objectResults["ribbon"]?.containsRepresentation("molecular-surface"), false)
+
+                    XCTAssertEqual(result.stickThenRibbonResults["stick"]?.containsRepresentation("ball-and-stick"), true)
+                    XCTAssertEqual(result.stickThenRibbonResults["ribbon"]?.containsRepresentation("cartoon"), true)
+                    XCTAssertEqual(result.stickThenRibbonResults["ribbon"]?.containsRepresentation("ball-and-stick"), false)
+
+                    XCTAssertEqual(result.rapidDisplayResults["ribbon"]?.containsRepresentation("cartoon"), true)
+                    XCTAssertEqual(result.rapidDisplayResults["ribbon"]?.containsRepresentation("molecular-surface"), false)
+
                     XCTAssertEqual(result.results["ribbon"]?.component(named: "All")?.reprs, ["ball-and-stick"])
                     XCTAssertEqual(result.results["ribbon"]?.component(named: "All")?.elements, 18)
                     XCTAssertEqual(result.results["ribbon"]?.component(named: "sele")?.reprs, ["cartoon"])
@@ -308,6 +323,10 @@ final class MolStarBridgeTests: XCTestCase {
 
 private struct ViewerAuditResult: Decodable {
     let pinchType: String
+    let globalResults: [String: [ViewerComponent]]
+    let objectResults: [String: [ViewerComponent]]
+    let stickThenRibbonResults: [String: [ViewerComponent]]
+    let rapidDisplayResults: [String: [ViewerComponent]]
     let results: [String: [ViewerComponent]]
 }
 
@@ -326,6 +345,10 @@ private struct ViewerComponent: Decodable {
 private extension Array where Element == ViewerComponent {
     func component(named name: String) -> ViewerComponent? {
         first { $0.label == name }
+    }
+
+    func containsRepresentation(_ representation: String) -> Bool {
+        contains { $0.reprs.contains(representation) }
     }
 }
 
@@ -443,22 +466,57 @@ private final class ViewerAuditRunner: NSObject, WKNavigationDelegate {
         window.__molappAuditProgress = 'creating selection';
         await cmd('setSelection', { type: 'expression', label: 'sele: chain A', ast: { kind: 'chain', value: 'A' } });
         await new Promise(resolve => setTimeout(resolve, 500));
+        function collectComponents() {
+          return window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures[0].components.map(c => ({
+            label: c.cell.obj?.label,
+            elements: c.cell.obj?.data?.elementCount,
+            reprs: (c.representations || []).map(r => r.cell.params?.values?.type?.name)
+          }));
+        }
+        const globalResults = {};
+        for (const representation of ['surface', 'ribbon']) {
+          window.__molappAuditProgress = 'setting global ' + representation;
+          await cmd('setRepresentation', { representation });
+          await new Promise(resolve => setTimeout(resolve, 600));
+          window.__molappAuditProgress = 'collecting global ' + representation;
+          globalResults[representation] = collectComponents();
+        }
+        const objectResults = {};
+        for (const representation of ['surface', 'ribbon']) {
+          window.__molappAuditProgress = 'setting object ' + representation;
+          await cmd('setObjectRepresentation', { name: 'Local structure', representation });
+          await new Promise(resolve => setTimeout(resolve, 600));
+          window.__molappAuditProgress = 'collecting object ' + representation;
+          objectResults[representation] = collectComponents();
+        }
+        const stickThenRibbonResults = {};
+        for (const representation of ['stick', 'ribbon']) {
+          window.__molappAuditProgress = 'setting global stick sequence ' + representation;
+          await cmd('setRepresentation', { representation });
+          await new Promise(resolve => setTimeout(resolve, 600));
+          window.__molappAuditProgress = 'collecting global stick sequence ' + representation;
+          stickThenRibbonResults[representation] = collectComponents();
+        }
+        const rapidDisplayResults = {};
+        window.__molappAuditProgress = 'setting rapid surface then ribbon';
+        const rapidSurface = cmd('setRepresentation', { representation: 'surface' });
+        const rapidRibbon = cmd('setRepresentation', { representation: 'ribbon' });
+        await Promise.all([rapidSurface, rapidRibbon]);
+        await new Promise(resolve => setTimeout(resolve, 600));
+        window.__molappAuditProgress = 'collecting rapid ribbon';
+        rapidDisplayResults.ribbon = collectComponents();
         const results = {};
         for (const representation of ['ribbon', 'surface', 'stick']) {
           window.__molappAuditProgress = 'setting ' + representation;
           await cmd('setObjectRepresentation', { name: 'sele', representation });
           await new Promise(resolve => setTimeout(resolve, 600));
           window.__molappAuditProgress = 'collecting ' + representation;
-          results[representation] = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures[0].components.map(c => ({
-            label: c.cell.obj?.label,
-            elements: c.cell.obj?.data?.elementCount,
-            reprs: (c.representations || []).map(r => r.cell.params?.values?.type?.name)
-          }));
+          results[representation] = collectComponents();
         }
         window.__molappAuditProgress = 'pinch';
         const pinchType = typeof window.molapp.handleNativePinch;
         window.molapp.handleNativePinch(1.2, 512, 384);
-        window.__molappAudit = JSON.stringify({ ok: true, value: { pinchType, results } });
+        window.__molappAudit = JSON.stringify({ ok: true, value: { pinchType, globalResults, objectResults, stickThenRibbonResults, rapidDisplayResults, results } });
       } catch (error) {
         window.__molappAudit = JSON.stringify({ ok: false, error: String(error && (error.stack || error.message || error)) });
       }

@@ -70,6 +70,7 @@
       const statusMessage = document.getElementById('viewer-status-message');
       const doubleTapDelayMs = 320;
       let lastTapTime = 0;
+      let nativeCommandQueue = Promise.resolve();
 
       function showError(error) {
         const message = error && error.message ? error.message : String(error);
@@ -286,7 +287,15 @@
         };
       }
 
-      async function handleNativeCommand(envelope) {
+      function handleNativeCommand(envelope) {
+        nativeCommandQueue = nativeCommandQueue.then(
+          function () { return performNativeCommand(envelope); },
+          function () { return performNativeCommand(envelope); }
+        );
+        return nativeCommandQueue;
+      }
+
+      async function performNativeCommand(envelope) {
         const id = envelope && envelope.id ? envelope.id : '';
         const command = envelope && envelope.command ? envelope.command : '';
 

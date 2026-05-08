@@ -15,6 +15,7 @@ struct MoleculeViewerView: View {
     @State private var commandText = ""
     @State private var isObjectsPanelExpanded = true
     @State private var colorPickerTarget: String? = nil
+    @FocusState private var isCommandFieldFocused: Bool
 
     var body: some View {
         ZStack {
@@ -208,6 +209,7 @@ struct MoleculeViewerView: View {
                 .textInputAutocapitalization(.never)
                 .keyboardType(.asciiCapable)
                 .submitLabel(.go)
+                .focused($isCommandFieldFocused)
                 .onSubmit(executeCommand)
                 .frame(minHeight: 36)
             
@@ -240,6 +242,10 @@ struct MoleculeViewerView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .frame(maxWidth: 600)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isCommandFieldFocused = true
+        }
     }
 
     private func executeCommand() {
