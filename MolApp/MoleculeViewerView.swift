@@ -77,6 +77,7 @@ struct MoleculeViewerView: View {
                 Spacer()
                 commandBar
             }
+            .zIndex(10)
         }
         .fileImporter(
             isPresented: $isFileImporterPresented,
@@ -210,6 +211,9 @@ struct MoleculeViewerView: View {
                 .keyboardType(.asciiCapable)
                 .submitLabel(.go)
                 .focused($isCommandFieldFocused)
+                .onTapGesture {
+                    isCommandFieldFocused = true
+                }
                 .onSubmit(executeCommand)
                 .frame(minHeight: 36)
             
@@ -242,6 +246,7 @@ struct MoleculeViewerView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .frame(maxWidth: 600)
+        .zIndex(10)
         .contentShape(Rectangle())
         .onTapGesture {
             isCommandFieldFocused = true

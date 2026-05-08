@@ -497,7 +497,7 @@
           const plugin = window.molapp.viewer.plugin;
 
           if (obj.type === 'structure') {
-            const target = obj.structureRef;
+            const target = findStructureObject(name);
             if (!target) return;
             const isCurrentlyHidden = target.cell.state.isHidden;
             if (Boolean(isCurrentlyHidden) === Boolean(isVisible)) {
@@ -530,9 +530,10 @@
             };
             const preset = presetMap[representation];
             if (!preset) throw new Error('Unknown representation: ' + representation);
-            const target = obj.structureRef;
+            const target = findStructureObject(name);
             if (!target) return;
             await plugin.managers.structure.component.applyPreset([target], preset);
+            obj.structureRef = findStructureObject(name) || target;
           } else if (obj.type === 'selection' && obj.loci) {
             const structures = plugin.managers.structure.hierarchy.current.structures;
             if (!structures.length) return;
@@ -585,7 +586,7 @@
             : { color: 'chain-id', colorParams: {} };
 
           if (obj.type === 'structure') {
-            const target = obj.structureRef;
+            const target = findStructureObject(name);
             if (!target) return;
             await plugin.managers.structure.component.updateRepresentationsTheme(
               target.components, theme
@@ -664,6 +665,22 @@
             if ((ref && cellRef === ref) || (Array.isArray(cellTags) && cellTags.includes(tag))) {
               return c;
             }
+          }
+        }
+        return null;
+      }
+
+      function findStructureObject(name) {
+        const plugin = window.molapp.viewer.plugin;
+        const structures = plugin.managers.structure.hierarchy.current.structures;
+        const stored = window.molapp.objects && window.molapp.objects[name];
+        const ref = stored && stored.structureRef && stored.structureRef.cell
+          ? stored.structureRef.cell.transform.ref
+          : null;
+
+        for (const s of structures) {
+          if ((ref && s.cell.transform.ref === ref) || s.cell.obj?.label === name) {
+            return s;
           }
         }
         return null;

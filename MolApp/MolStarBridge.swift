@@ -134,6 +134,8 @@ final class MolStarBridge: NSObject, ObservableObject {
     private weak var webView: WKWebView?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var pendingScripts: [String] = []
+    private var isEvaluatingScript = false
 
     func attach(webView: WKWebView) {
         self.webView = webView
@@ -205,9 +207,33 @@ final class MolStarBridge: NSObject, ObservableObject {
                 return
             }
 
-            webView?.evaluateJavaScript("window.molapp.handleNativeCommand(\(json));")
+            enqueueScript("window.molapp.handleNativeCommand(\(json));")
         } catch {
             lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func enqueueScript(_ script: String) {
+        pendingScripts.append(script)
+        evaluateNextScriptIfNeeded()
+    }
+
+    private func evaluateNextScriptIfNeeded() {
+        guard !isEvaluatingScript, !pendingScripts.isEmpty else { return }
+        guard let webView else {
+            pendingScripts.removeAll()
+            return
+        }
+
+        isEvaluatingScript = true
+        let script = pendingScripts.removeFirst()
+        webView.evaluateJavaScript(script) { [weak self] _, error in
+            guard let self else { return }
+            if let error {
+                self.lastErrorMessage = error.localizedDescription
+            }
+            self.isEvaluatingScript = false
+            self.evaluateNextScriptIfNeeded()
         }
     }
 

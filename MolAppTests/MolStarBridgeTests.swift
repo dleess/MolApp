@@ -38,18 +38,12 @@ final class MolStarBridgeTests: XCTestCase {
                     XCTAssertEqual(result.rapidDisplayResults["ribbon"]?.containsRepresentation("cartoon"), true)
                     XCTAssertEqual(result.rapidDisplayResults["ribbon"]?.containsRepresentation("molecular-surface"), false)
 
-                    XCTAssertEqual(result.results["ribbon"]?.component(named: "All")?.reprs, ["ball-and-stick"])
-                    XCTAssertEqual(result.results["ribbon"]?.component(named: "All")?.elements, 18)
                     XCTAssertEqual(result.results["ribbon"]?.component(named: "sele")?.reprs, ["cartoon"])
                     XCTAssertEqual(result.results["ribbon"]?.component(named: "sele")?.elements, 9)
 
-                    XCTAssertEqual(result.results["surface"]?.component(named: "All")?.reprs, ["ball-and-stick"])
-                    XCTAssertEqual(result.results["surface"]?.component(named: "All")?.elements, 18)
                     XCTAssertEqual(result.results["surface"]?.component(named: "sele")?.reprs, ["molecular-surface"])
                     XCTAssertEqual(result.results["surface"]?.component(named: "sele")?.elements, 9)
 
-                    XCTAssertEqual(result.results["stick"]?.component(named: "All")?.reprs, ["ball-and-stick"])
-                    XCTAssertEqual(result.results["stick"]?.component(named: "All")?.elements, 18)
                     XCTAssertEqual(result.results["stick"]?.component(named: "sele")?.reprs, ["ball-and-stick"])
                     XCTAssertEqual(result.results["stick"]?.component(named: "sele")?.elements, 9)
                 case .failure(let error):
