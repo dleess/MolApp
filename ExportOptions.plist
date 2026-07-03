@@ -3,15 +3,22 @@
 <plist version="1.0">
 <dict>
 	<key>destination</key>
-	<string>upload</string>
+	<string>export</string>
 	<key>method</key>
 	<string>app-store-connect</string>
 	<key>signingStyle</key>
-	<string>automatic</string>
+	<string>manual</string>
+	<key>teamID</key>
+	<string>6536ULS8SC</string>
+	<key>signingCertificate</key>
+	<string>Apple Distribution: Donghan Lee (6536ULS8SC)</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>com.donghan.MolApp</key>
+		<string>MolViewApp AppStore</string>
+	</dict>
 	<key>stripSwiftSymbols</key>
 	<true/>
-	<key>teamID</key>
-	<string>ABCDE12345</string>
 	<key>uploadSymbols</key>
 	<true/>
 </dict>
