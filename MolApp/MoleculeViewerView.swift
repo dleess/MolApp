@@ -16,6 +16,8 @@ struct MoleculeViewerView: View {
     @State private var commandText = ""
     @State private var isObjectsPanelExpanded = true
     @State private var colorPickerTarget: String? = nil
+    @State private var isMorphing = false
+    @State private var isManualPresented = false
 
     var body: some View {
         ZStack {
@@ -85,6 +87,9 @@ struct MoleculeViewerView: View {
             allowsMultipleSelection: false,
             onCompletion: handleFileImport
         )
+        .sheet(isPresented: $isManualPresented) {
+            ManualView()
+        }
         .onReceive(bridge.$lastErrorMessage) { message in
             localErrorMessage = message
         }
@@ -103,6 +108,18 @@ struct MoleculeViewerView: View {
                 bridge.addObject(MolAppObject(name: name, type: .structure))
             case .setRepresentation:
                 statusMessage = "\(selectedRepresentation.title) representation"
+            case .surfacePotential:
+                statusMessage = "Electrostatic potential (screened Coulomb)"
+            case .startMorph:
+                isMorphing = true
+                statusMessage = "Morphing"
+            case .stopMorph:
+                isMorphing = false
+                statusMessage = "Morph stopped"
+            case .superpose:
+                statusMessage = "Superposed visible structures"
+            case .secondaryStructure:
+                statusMessage = "Secondary structure (helix/sheet/coil)"
             default:
                 break
             }
@@ -116,6 +133,13 @@ struct MoleculeViewerView: View {
 
     private var errorMessage: String? {
         localErrorMessage ?? bridge.lastErrorMessage
+    }
+
+    // Structures the user has left visible (eye-on) in the Objects panel. Global actions
+    // (representation, surface potential, morph) are scoped to this selection so loading
+    // multiple PDBs and hiding some restricts actions to the ones still shown.
+    private var visibleStructureNames: [String] {
+        bridge.objects.filter { $0.type == .structure && $0.isVisible }.map(\.name)
     }
 
     private var menuBar: some View {
@@ -171,18 +195,60 @@ struct MoleculeViewerView: View {
 
             Menu("Calculation") {
                 Button {
-                    statusMessage = "Calculation tools unavailable"
+                    localErrorMessage = nil
+                    statusMessage = "Computing surface potential…"
+                    bridge.drawSurfacePotential(targets: visibleStructureNames)
                 } label: {
-                    Label("No Calculations Available", systemImage: "function")
+                    Label("Surface Potential", systemImage: "bolt.circle")
                 }
-                .disabled(true)
+
+                Button {
+                    localErrorMessage = nil
+                    statusMessage = "Assigning secondary structure…"
+                    bridge.computeSecondaryStructure(targets: visibleStructureNames)
+                } label: {
+                    Label("Secondary Structure", systemImage: "scribble.variable")
+                }
+                .disabled(visibleStructureNames.isEmpty)
+
+                Button {
+                    localErrorMessage = nil
+                    statusMessage = "Superposing structures…"
+                    bridge.superpose(targets: visibleStructureNames)
+                } label: {
+                    Label("Superpose Visible", systemImage: "square.on.square.dashed")
+                }
+                .disabled(visibleStructureNames.count < 2)
+
+                Section("Morph") {
+                    Button {
+                        localErrorMessage = nil
+                        if isMorphing {
+                            bridge.stopMorph()
+                        } else {
+                            statusMessage = "Morphing trajectory…"
+                            bridge.startMorph(loop: false, targets: visibleStructureNames)
+                        }
+                    } label: {
+                        Label(
+                            isMorphing ? "Stop Morph" : "Start Morph",
+                            systemImage: isMorphing ? "stop.circle" : "play.circle"
+                        )
+                    }
+                }
             }
 
             Menu("Help") {
                 Button {
+                    isManualPresented = true
+                } label: {
+                    Label("Manual", systemImage: "book")
+                }
+
+                Button {
                     statusMessage = "Open a PDB/mmCIF file or enter a PDB ID"
                 } label: {
-                    Label("Viewer Help", systemImage: "questionmark.circle")
+                    Label("Quick Help", systemImage: "questionmark.circle")
                 }
             }
 
@@ -320,6 +386,28 @@ struct MoleculeViewerView: View {
             bridge.clearSelection()
         case "focus":
             bridge.focusSelection()
+        case "surfpot", "potential":
+            statusMessage = "Computing surface potential…"
+            bridge.drawSurfacePotential(targets: visibleStructureNames)
+        case "ss", "dssp", "secstr":
+            statusMessage = "Assigning secondary structure…"
+            bridge.computeSecondaryStructure(targets: visibleStructureNames)
+        case "super", "superpose", "align":
+            if visibleStructureNames.count < 2 {
+                localErrorMessage = "Show at least two structures to superpose."
+            } else {
+                statusMessage = "Superposing structures…"
+                bridge.superpose(targets: visibleStructureNames)
+            }
+        case "morph":
+            let arg = components.count >= 2 ? components[1] : "start"
+            if arg == "stop" {
+                bridge.stopMorph()
+            } else {
+                let loop = components.contains("loop")
+                statusMessage = "Morphing trajectory…"
+                bridge.startMorph(loop: loop, targets: visibleStructureNames)
+            }
         default:
             localErrorMessage = "Unknown command: \(command)"
         }
@@ -354,7 +442,7 @@ struct MoleculeViewerView: View {
     private func setRepresentation(_ representation: MoleculeRepresentation) {
         selectedRepresentation = representation
         localErrorMessage = nil
-        bridge.setRepresentation(representation.rawValue)
+        bridge.setRepresentation(representation.rawValue, targets: visibleStructureNames)
     }
 
     private func toggleVisibility(_ feature: MoleculeVisibilityFeature) {
@@ -507,6 +595,121 @@ struct MoleculeViewerView: View {
         .padding(14)
         .background(.black.opacity(0.88), in: RoundedRectangle(cornerRadius: 10))
         .presentationCompactAdaptation(.popover)
+    }
+}
+
+enum AppInfo {
+    static let version = "0.1"
+}
+
+struct ManualView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    private struct Command: Identifiable {
+        let id = UUID()
+        let syntax: String
+        let detail: String
+    }
+
+    private struct Section: Identifiable {
+        let id = UUID()
+        let title: String
+        let icon: String
+        let body: String
+        let commands: [Command]
+    }
+
+    private let sections: [Section] = [
+        Section(
+            title: "Loading structures",
+            icon: "square.and.arrow.down",
+            body: "Open a local PDB/mmCIF file with File ▸ Open Structure, or fetch from the RCSB by entering a 4-character PDB ID and tapping Load PDB. Multiple structures can be loaded at once — each appears in the Objects panel.",
+            commands: [
+                Command(syntax: "load 1UBQ", detail: "Fetch and display a PDB entry by ID")
+            ]
+        ),
+        Section(
+            title: "Objects panel",
+            icon: "square.stack.3d.up",
+            body: "Every loaded structure and named selection is listed at the bottom-left. The eye toggles a structure's visibility. The colored dot opens a color picker. The Rib / Sur / Stk / B+S buttons switch that object's representation. Calculation and Display actions apply only to the structures currently shown (eye on).",
+            commands: [
+                Command(syntax: "show NAME / hide NAME", detail: "Show or hide an object (or water / ligand)"),
+                Command(syntax: "repr surface NAME", detail: "Set an object's representation"),
+                Command(syntax: "color red NAME", detail: "Recolor an object (or 'default')")
+            ]
+        ),
+        Section(
+            title: "Selections",
+            icon: "lasso",
+            body: "Build a named selection from an expression. Combine terms with & (and), | (or), ! (not) and parentheses. Tap an atom in the viewport to select it; double-tap to focus.",
+            commands: [
+                Command(syntax: "select sele chain A & resn ALA", detail: "Name a selection from an expression"),
+                Command(syntax: "res 10-25 · residue 42 · atom CA", detail: "Residue range, single residue, atom name"),
+                Command(syntax: "clear · focus", detail: "Clear the selection · frame it in view")
+            ]
+        ),
+        Section(
+            title: "Calculation",
+            icon: "function",
+            body: "Analyses run on the visible structures. Surface Potential draws a molecular surface colored by a screened-Coulomb (APBS-like) electrostatic potential. Secondary Structure assigns helix / sheet / coil (DSSP when the model has none) and colors a cartoon. Superpose aligns visible structures onto the first by sequence alignment plus iterative Cα fitting — sequences need not match. Morph animates through the models of a multi-model structure (NMR ensemble / trajectory).",
+            commands: [
+                Command(syntax: "surfpot", detail: "Electrostatic potential surface"),
+                Command(syntax: "ss", detail: "Secondary structure (DSSP) coloring"),
+                Command(syntax: "super", detail: "Superpose the visible structures"),
+                Command(syntax: "morph · morph stop", detail: "Start / stop trajectory morph")
+            ]
+        )
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    Text("MolApp is a molecular structure viewer built on Mol*. Use the menu bar, the Objects panel, or the command line at the bottom of the screen.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    ForEach(sections) { section in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(section.title, systemImage: section.icon)
+                                .font(.headline)
+                            Text(section.body)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(section.commands) { command in
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(command.syntax)
+                                            .font(.system(.footnote, design: .monospaced).weight(.semibold))
+                                        Text(command.detail)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+
+                    Text("MolApp version \(AppInfo.version)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 8)
+                }
+                .padding(20)
+            }
+            .navigationTitle("Manual")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }
 

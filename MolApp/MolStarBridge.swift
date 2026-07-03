@@ -13,6 +13,11 @@ enum MolStarCommandName: String, Codable {
     case setObjectVisibility
     case setObjectRepresentation
     case setObjectColor
+    case surfacePotential
+    case startMorph
+    case stopMorph
+    case superpose
+    case secondaryStructure
 }
 
 struct MolStarCommandResult: Decodable {
@@ -149,8 +154,8 @@ final class MolStarBridge: NSObject, ObservableObject {
         send(.loadPdbId, payload: PdbPayload(pdbId: pdbId))
     }
 
-    func setRepresentation(_ representation: String) {
-        send(.setRepresentation, payload: RepresentationPayload(representation: representation))
+    func setRepresentation(_ representation: String, targets: [String] = []) {
+        send(.setRepresentation, payload: RepresentationPayload(representation: representation, targets: targets))
     }
 
     func toggleVisibility(feature: String, isVisible: Bool) {
@@ -192,6 +197,26 @@ final class MolStarBridge: NSObject, ObservableObject {
         updateObject(name: name) { $0.colorHex = colorHex }
     }
 
+    func drawSurfacePotential(targets: [String] = []) {
+        send(.surfacePotential, payload: TargetedPayload(targets: targets))
+    }
+
+    func startMorph(durationInS: Double = 5, loop: Bool = false, targets: [String] = []) {
+        send(.startMorph, payload: MorphPayload(durationInS: durationInS, loop: loop, targets: targets))
+    }
+
+    func stopMorph() {
+        send(.stopMorph, payload: EmptyPayload())
+    }
+
+    func superpose(targets: [String] = []) {
+        send(.superpose, payload: TargetedPayload(targets: targets))
+    }
+
+    func computeSecondaryStructure(targets: [String] = []) {
+        send(.secondaryStructure, payload: TargetedPayload(targets: targets))
+    }
+
     private func updateObject(name: String, update: (inout MolAppObject) -> Void) {
         if let idx = objects.firstIndex(where: { $0.name == name }) {
             update(&objects[idx])
@@ -207,7 +232,7 @@ final class MolStarBridge: NSObject, ObservableObject {
                 return
             }
 
-            enqueueScript("window.molapp.handleNativeCommand(\(json));")
+            enqueueScript("window.molapp.handleNativeCommand(\(json)); void 0;")
         } catch {
             lastErrorMessage = error.localizedDescription
         }
@@ -291,6 +316,11 @@ private struct PdbPayload: Encodable {
 
 private struct RepresentationPayload: Encodable {
     let representation: String
+    let targets: [String]
+}
+
+private struct TargetedPayload: Encodable {
+    let targets: [String]
 }
 
 private struct VisibilityPayload: Encodable {
@@ -311,6 +341,12 @@ private struct ObjectRepresentationPayload: Encodable {
 private struct ObjectColorPayload: Encodable {
     let name: String
     let colorHex: String?
+}
+
+private struct MorphPayload: Encodable {
+    let durationInS: Double
+    let loop: Bool
+    let targets: [String]
 }
 
 extension Color {

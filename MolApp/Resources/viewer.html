@@ -128,7 +128,29 @@
         await resetCamera();
       }
 
-      async function applyRepresentationPreset(representation) {
+      // Resolve which loaded structures an action applies to. `payload.targets` is the list
+      // of structure names the user has left visible in the Objects panel; when it is present
+      // and non-empty, actions are scoped to just those. An empty/absent list falls back to
+      // every loaded structure (e.g. a single structure, or nothing tracked yet).
+      function targetStructures(payload) {
+        const all = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
+        const targets = payload && Array.isArray(payload.targets) ? payload.targets : [];
+        if (!targets.length) {
+          return all;
+        }
+        // Resolve each name via findStructureObject (matches by tracked structureRef or
+        // label) — the structure's cell label does not always equal the loaded PDB name.
+        const result = [];
+        for (const name of targets) {
+          const s = findStructureObject(name);
+          if (s && result.indexOf(s) === -1) {
+            result.push(s);
+          }
+        }
+        return result;
+      }
+
+      async function applyRepresentationPreset(representation, structures) {
         const presetByRepresentation = {
           ribbon: 'preset-structure-representation-polymer-cartoon',
           surface: 'preset-structure-representation-molecular-surface',
@@ -139,12 +161,14 @@
           throw new Error('Unknown representation: ' + representation);
         }
 
-        const structures = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
-        if (!structures.length) {
+        const targets = structures && structures.length
+          ? structures
+          : window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
+        if (!targets.length) {
           throw new Error('Load a structure before changing representation.');
         }
 
-        await window.molapp.viewer.plugin.managers.structure.component.applyPreset(structures, preset);
+        await window.molapp.viewer.plugin.managers.structure.component.applyPreset(targets, preset);
         window.molapp.representation = representation;
         await resetCamera();
       }
@@ -356,7 +380,7 @@
           };
         },
         setRepresentation: async function (payload) {
-          await applyRepresentationPreset(payload.representation || '');
+          await applyRepresentationPreset(payload.representation || '', targetStructures(payload));
         },
         toggleVisibility: async function (payload) {
           const feature = payload.feature; // 'water' or 'ligand'
@@ -601,11 +625,536 @@
           if (window.molapp.objects[name]) {
             window.molapp.objects[name].colorHex = colorHex;
           }
+        },
+
+        surfacePotential: async function (payload) {
+          const plugin = window.molapp.viewer.plugin;
+          const structures = targetStructures(payload);
+          if (!structures.length) {
+            throw new Error('No visible structure to compute surface potential.');
+          }
+
+          // Build a molecular surface colored by a continuous electrostatic potential map
+          // (screened-Coulomb / Debye-Hückel approximation of Poisson-Boltzmann — an
+          // APBS-like map computed on-device without an external APBS volume). Creating the
+          // representation with the color theme up front is more reliable than recoloring a
+          // preset after the fact.
+          registerEspColorTheme();
+
+          // Remove any surface from a previous run so repeated calls don't stack.
+          const priorRefs = window.molapp.surfacePotentialRefs || [];
+          for (const ref of priorRefs) {
+            try { await plugin.state.data.build().delete(ref).commit(); } catch (e) {}
+          }
+          window.molapp.surfacePotentialRefs = [];
+
+          for (const s of structures) {
+            const comp = await plugin.builders.structure.tryCreateComponentStatic(
+              s.cell, 'polymer', 'surface-potential'
+            );
+            if (comp && comp.cell) {
+              await plugin.builders.structure.representation.addRepresentation(
+                comp.cell,
+                { type: 'molecular-surface', color: 'molapp-esp', colorParams: {} }
+              );
+              window.molapp.surfacePotentialRefs.push(comp.cell.transform.ref);
+            }
+          }
+          window.molapp.representation = 'surface-potential';
+          await resetCamera();
+        },
+
+        startMorph: async function (payload) {
+          const plugin = window.molapp.viewer.plugin;
+          const current = plugin.managers.structure.hierarchy.current;
+          if (!targetStructures(payload).length) {
+            throw new Error('No visible structure to morph.');
+          }
+
+          const frameCount = (current.trajectories || []).reduce(function (max, t) {
+            const count = t && t.cell && t.cell.obj && t.cell.obj.data ? t.cell.obj.data.frameCount : 0;
+            return Math.max(max, count || 0);
+          }, 0);
+          if (frameCount <= 1) {
+            throw new Error('Morph needs a multi-model structure (e.g. an NMR ensemble or trajectory).');
+          }
+
+          const anim = plugin.managers.animation.animations.find(function (a) {
+            return a.name === 'built-in.animate-model-index';
+          });
+          if (!anim) {
+            throw new Error('Trajectory animation is unavailable in this build.');
+          }
+
+          const durationInS = payload && payload.durationInS ? payload.durationInS : 5;
+          const mode = payload && payload.loop
+            ? { name: 'loop', params: { direction: 'forward' } }
+            : { name: 'palindrome', params: {} };
+
+          await plugin.managers.animation.play(anim, {
+            mode,
+            duration: { name: 'fixed', params: { durationInS } }
+          });
+          window.molapp.morphing = true;
+        },
+
+        stopMorph: async function () {
+          const plugin = window.molapp.viewer.plugin;
+          await plugin.managers.animation.stop();
+          window.molapp.morphing = false;
+        },
+
+        secondaryStructure: async function (payload) {
+          const plugin = window.molapp.viewer.plugin;
+          const structures = targetStructures(payload);
+          if (!structures.length) {
+            throw new Error('No visible structure for secondary-structure assignment.');
+          }
+
+          // Render the visible structures as a cartoon colored by secondary structure
+          // (helix / sheet / coil). Recoloring through the component manager (rather than
+          // building the representation with the theme directly) is what triggers Mol* to
+          // attach its computed-secondary-structure property — assigning SS from the model
+          // when present and running the DSSP calculation when it is not.
+          await plugin.managers.structure.component.applyPreset(
+            structures,
+            'preset-structure-representation-polymer-cartoon'
+          );
+          const refreshed = plugin.managers.structure.hierarchy.current.structures;
+          for (const s of refreshed) {
+            const components = (s.components || []).filter(function (c) {
+              return c && c.cell && c.cell.obj;
+            });
+            if (components.length) {
+              await plugin.managers.structure.component.updateRepresentationsTheme(
+                components,
+                { color: 'secondary-structure', colorParams: {} }
+              );
+            }
+          }
+          window.molapp.representation = 'secondary-structure';
+          await resetCamera();
+        },
+
+        superpose: async function (payload) {
+          const structs = targetStructures(payload);
+          if (structs.length < 2) {
+            throw new Error('Show at least two structures to superpose.');
+          }
+
+          // First visible structure is the fixed reference. Align the rest onto it by
+          // sequence-aligning their Cα chains (Needleman-Wunsch), then iteratively fitting
+          // to the common structural core — so structures with different sequences align too.
+          const reference = structs[0];
+          const refRes = buildResidueList(reference.cell.obj.data);
+          if (!refRes.ca.length) {
+            throw new Error('Reference structure has no Cα atoms to align.');
+          }
+          let alignedCount = 0;
+          let bestRmsd = null;
+          let smallestCore = null;
+
+          for (let i = 1; i < structs.length; i++) {
+            const mobile = structs[i];
+            const mobileRes = buildResidueList(mobile.cell.obj.data);
+            if (!mobileRes.ca.length) continue;
+
+            const columns = needlemanWunsch(mobileRes.seq, refRes.seq);
+            if (columns.length < 3) continue;
+            const P = columns.map(function (c) { return mobileRes.ca[c[0]]; });
+            const Q = columns.map(function (c) { return refRes.ca[c[1]]; });
+
+            const fit = refineSuperposition(P, Q);
+            if (!fit) continue;
+
+            await applyConformationTransform(mobile.cell, fit.transform);
+            alignedCount++;
+            bestRmsd = bestRmsd === null ? fit.rmsd : Math.min(bestRmsd, fit.rmsd);
+            smallestCore = smallestCore === null ? fit.coreSize : Math.min(smallestCore, fit.coreSize);
+          }
+
+          if (!alignedCount) {
+            throw new Error('Could not align — no comparable Cα core found.');
+          }
+          window.molapp.superposeRmsd = bestRmsd;
+          window.molapp.superposeCore = smallestCore;
+          await resetCamera();
         }
       };
 
+      const THREE_TO_ONE = {
+        ALA: 'A', ARG: 'R', ASN: 'N', ASP: 'D', CYS: 'C', GLN: 'Q', GLU: 'E',
+        GLY: 'G', HIS: 'H', ILE: 'I', LEU: 'L', LYS: 'K', MET: 'M', PHE: 'F',
+        PRO: 'P', SER: 'S', THR: 'T', TRP: 'W', TYR: 'Y', VAL: 'V',
+        MSE: 'M', SEC: 'U', PYL: 'O'
+      };
+
+      // Ordered Cα list for one structure: 1-letter sequence + matching coordinates.
+      function buildResidueList(structureData) {
+        const lib = window.molstar.lib.structure;
+        const SP = lib.StructureProperties;
+        const loc = lib.StructureElement.Location.create(structureData);
+        const rows = [];
+        for (const unit of structureData.units) {
+          if (unit.kind !== 0) continue;
+          loc.unit = unit;
+          const els = unit.elements;
+          for (let i = 0, n = els.length; i < n; i++) {
+            loc.element = els[i];
+            if (SP.atom.label_atom_id(loc) !== 'CA') continue;
+            rows.push({
+              chain: SP.chain.auth_asym_id(loc),
+              seq: SP.residue.auth_seq_id(loc),
+              aa: THREE_TO_ONE[SP.residue.label_comp_id(loc)] || 'X',
+              ca: [SP.atom.x(loc), SP.atom.y(loc), SP.atom.z(loc)]
+            });
+          }
+        }
+        rows.sort(function (a, b) {
+          if (a.chain !== b.chain) return a.chain < b.chain ? -1 : 1;
+          return a.seq - b.seq;
+        });
+        return {
+          seq: rows.map(function (r) { return r.aa; }).join(''),
+          ca: rows.map(function (r) { return r.ca; })
+        };
+      }
+
+      // Global sequence alignment (Needleman-Wunsch). Returns aligned column index pairs
+      // [mobileIndex, refIndex] for every position where neither sequence has a gap.
+      function needlemanWunsch(a, b) {
+        const n = a.length, m = b.length, w = m + 1;
+        const GAP = -2, MATCH = 2, MISMATCH = -1;
+        const S = new Float32Array((n + 1) * w);
+        const T = new Int8Array((n + 1) * w); // 0 diag, 1 up (gap in b), 2 left (gap in a)
+        for (let i = 0; i <= n; i++) { S[i * w] = i * GAP; T[i * w] = 1; }
+        for (let j = 0; j <= m; j++) { S[j] = j * GAP; T[j] = 2; }
+        T[0] = 0;
+        for (let i = 1; i <= n; i++) {
+          const ai = a.charCodeAt(i - 1);
+          for (let j = 1; j <= m; j++) {
+            const sc = ai === b.charCodeAt(j - 1) ? MATCH : MISMATCH;
+            let best = S[(i - 1) * w + (j - 1)] + sc, t = 0;
+            const up = S[(i - 1) * w + j] + GAP;
+            if (up > best) { best = up; t = 1; }
+            const left = S[i * w + (j - 1)] + GAP;
+            if (left > best) { best = left; t = 2; }
+            S[i * w + j] = best; T[i * w + j] = t;
+          }
+        }
+        const columns = [];
+        let i = n, j = m;
+        while (i > 0 || j > 0) {
+          const t = T[i * w + j];
+          if (i > 0 && j > 0 && t === 0) { columns.push([i - 1, j - 1]); i--; j--; }
+          else if (i > 0 && t === 1) { i--; }
+          else { j--; }
+        }
+        columns.reverse();
+        return columns;
+      }
+
+      // Iterative structural refinement: fit, drop pairs beyond a distance cutoff, refit.
+      // Converges onto the common core so divergent regions don't distort the alignment.
+      function refineSuperposition(P, Q) {
+        let idx = P.map(function (_, k) { return k; });
+        let transform = kabschTransform(P, Q);
+        const cutoffs = [8.0, 6.0, 4.0, 3.0, 3.0];
+        for (let round = 0; round < cutoffs.length; round++) {
+          const cutoff = cutoffs[round];
+          const kept = [];
+          for (let t = 0; t < idx.length; t++) {
+            const k = idx[t];
+            if (transformedDistance(P[k], Q[k], transform) <= cutoff) kept.push(k);
+          }
+          if (kept.length < 3) break;
+          idx = kept;
+          transform = kabschTransform(
+            idx.map(function (k) { return P[k]; }),
+            idx.map(function (k) { return Q[k]; })
+          );
+        }
+        if (idx.length < 3) return null;
+        const coreP = idx.map(function (k) { return P[k]; });
+        const coreQ = idx.map(function (k) { return Q[k]; });
+        return { transform: transform, coreSize: idx.length, rmsd: rmsdAfterTransform(coreP, coreQ, transform) };
+      }
+
+      function transformedDistance(p, q, m) {
+        const tx = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+        const ty = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+        const tz = m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14];
+        const dx = tx - q[0], dy = ty - q[1], dz = tz - q[2];
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+
+      // Kabsch superposition via the quaternion (Coutsias) method — no SVD required.
+      // Returns a column-major Mat4 mapping the mobile points P onto the reference points Q.
+      function kabschTransform(P, Q) {
+        const n = P.length;
+        let cpx = 0, cpy = 0, cpz = 0, cqx = 0, cqy = 0, cqz = 0;
+        for (let i = 0; i < n; i++) {
+          cpx += P[i][0]; cpy += P[i][1]; cpz += P[i][2];
+          cqx += Q[i][0]; cqy += Q[i][1]; cqz += Q[i][2];
+        }
+        cpx /= n; cpy /= n; cpz /= n; cqx /= n; cqy /= n; cqz /= n;
+
+        let Sxx = 0, Sxy = 0, Sxz = 0, Syx = 0, Syy = 0, Syz = 0, Szx = 0, Szy = 0, Szz = 0;
+        for (let i = 0; i < n; i++) {
+          const px = P[i][0] - cpx, py = P[i][1] - cpy, pz = P[i][2] - cpz;
+          const qx = Q[i][0] - cqx, qy = Q[i][1] - cqy, qz = Q[i][2] - cqz;
+          Sxx += px * qx; Sxy += px * qy; Sxz += px * qz;
+          Syx += py * qx; Syy += py * qy; Syz += py * qz;
+          Szx += pz * qx; Szy += pz * qy; Szz += pz * qz;
+        }
+
+        const K = [
+          [Sxx + Syy + Szz, Syz - Szy,        Szx - Sxz,        Sxy - Syx],
+          [Syz - Szy,       Sxx - Syy - Szz,  Sxy + Syx,        Szx + Sxz],
+          [Szx - Sxz,       Sxy + Syx,       -Sxx + Syy - Szz,  Syz + Szy],
+          [Sxy - Syx,       Szx + Sxz,        Syz + Szy,       -Sxx - Syy + Szz]
+        ];
+        const qt = largestEigenvector4(K);
+        const w = qt[0], x = qt[1], y = qt[2], z = qt[3];
+
+        const R00 = 1 - 2 * (y * y + z * z), R01 = 2 * (x * y - w * z),     R02 = 2 * (x * z + w * y);
+        const R10 = 2 * (x * y + w * z),     R11 = 1 - 2 * (x * x + z * z), R12 = 2 * (y * z - w * x);
+        const R20 = 2 * (x * z - w * y),     R21 = 2 * (y * z + w * x),     R22 = 1 - 2 * (x * x + y * y);
+
+        const tx = cqx - (R00 * cpx + R01 * cpy + R02 * cpz);
+        const ty = cqy - (R10 * cpx + R11 * cpy + R12 * cpz);
+        const tz = cqz - (R20 * cpx + R21 * cpy + R22 * cpz);
+
+        return [R00, R10, R20, 0, R01, R11, R21, 0, R02, R12, R22, 0, tx, ty, tz, 1];
+      }
+
+      // Largest-eigenvalue eigenvector of a symmetric 4x4 matrix via the cyclic Jacobi method.
+      function largestEigenvector4(input) {
+        const a = [input[0].slice(), input[1].slice(), input[2].slice(), input[3].slice()];
+        const v = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+        for (let iter = 0; iter < 100; iter++) {
+          let p = 0, qi = 1, max = 0;
+          for (let r = 0; r < 4; r++) {
+            for (let c = r + 1; c < 4; c++) {
+              if (Math.abs(a[r][c]) > max) { max = Math.abs(a[r][c]); p = r; qi = c; }
+            }
+          }
+          if (max < 1e-12) break;
+
+          const app = a[p][p], aqq = a[qi][qi], apq = a[p][qi];
+          const beta = (aqq - app) / (2 * apq);
+          const t = (beta >= 0 ? 1 : -1) / (Math.abs(beta) + Math.sqrt(beta * beta + 1));
+          const c = 1 / Math.sqrt(t * t + 1), s = t * c;
+
+          for (let k = 0; k < 4; k++) {
+            const akp = a[k][p], akq = a[k][qi];
+            a[k][p] = c * akp - s * akq;
+            a[k][qi] = s * akp + c * akq;
+          }
+          for (let k = 0; k < 4; k++) {
+            const apk = a[p][k], aqk = a[qi][k];
+            a[p][k] = c * apk - s * aqk;
+            a[qi][k] = s * apk + c * aqk;
+          }
+          for (let k = 0; k < 4; k++) {
+            const vkp = v[k][p], vkq = v[k][qi];
+            v[k][p] = c * vkp - s * vkq;
+            v[k][qi] = s * vkp + c * vkq;
+          }
+        }
+
+        let best = 0, bestVal = a[0][0];
+        for (let i = 1; i < 4; i++) {
+          if (a[i][i] > bestVal) { bestVal = a[i][i]; best = i; }
+        }
+        const vec = [v[0][best], v[1][best], v[2][best], v[3][best]];
+        const norm = Math.sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2] + vec[3] * vec[3]) || 1;
+        return [vec[0] / norm, vec[1] / norm, vec[2] / norm, vec[3] / norm];
+      }
+
+      function rmsdAfterTransform(P, Q, m) {
+        let sum = 0;
+        for (let i = 0; i < P.length; i++) {
+          const x = P[i][0], y = P[i][1], z = P[i][2];
+          const tx = m[0] * x + m[4] * y + m[8] * z + m[12];
+          const ty = m[1] * x + m[5] * y + m[9] * z + m[13];
+          const tz = m[2] * x + m[6] * y + m[10] * z + m[14];
+          const dx = tx - Q[i][0], dy = ty - Q[i][1], dz = tz - Q[i][2];
+          sum += dx * dx + dy * dy + dz * dz;
+        }
+        return Math.sqrt(sum / P.length);
+      }
+
+      function resolveStateTransforms() {
+        const m = window.molstar || {};
+        const ST = (m.lib && m.lib.plugin && m.lib.plugin.StateTransforms)
+          || m.StateTransforms
+          || (m.lib && m.lib.StateTransforms);
+        if (!ST || !ST.Model || !ST.Model.TransformStructureConformation) {
+          throw new Error('Superposition transform API is unavailable in this build.');
+        }
+        return ST;
+      }
+
+      async function applyConformationTransform(cell, mat4) {
+        const plugin = window.molapp.viewer.plugin;
+        const ST = resolveStateTransforms();
+        window.molapp.superposeRefs = window.molapp.superposeRefs || {};
+        const cellRef = cell.transform.ref;
+
+        // Remove any transform from a previous superpose so re-runs don't compose/drift.
+        const prior = window.molapp.superposeRefs[cellRef];
+        if (prior) {
+          try { await plugin.state.data.build().delete(prior).commit(); } catch (e) {}
+        }
+
+        const builder = plugin.state.data.build().to(cell).insert(
+          ST.Model.TransformStructureConformation,
+          { transform: { name: 'matrix', params: { data: mat4, transpose: false } } }
+        );
+        const newRef = builder.ref;
+        await plugin.runTask(plugin.state.data.updateTree(builder));
+        window.molapp.superposeRefs[cellRef] = newRef;
+      }
+
       function hexToMolStarColor(hex) {
         return parseInt(hex.replace('#', ''), 16);
+      }
+
+      // Per-atom point charges (elementary-charge units) for the ionizable groups that
+      // dominate a protein's electrostatic potential. Carboxylate oxygens carry -0.5 each
+      // (net -1 per Asp/Glu), the Lys ammonium and Arg guanidinium carry +1 total, His is
+      // treated as weakly protonated, and the C-terminal carboxylate (OXT) adds -1.
+      const ESP_ATOM_CHARGES = {
+        ASP: { OD1: -0.5, OD2: -0.5 },
+        GLU: { OE1: -0.5, OE2: -0.5 },
+        LYS: { NZ: 1.0 },
+        ARG: { NH1: 0.5, NH2: 0.5 },
+        HIS: { ND1: 0.1, NE2: 0.1 }
+      };
+      const ESP_DEBYE_LENGTH = 8.0;   // Å — Debye screening length at ~0.15 M ionic strength
+      const ESP_MIN_DISTANCE = 1.5;   // Å — softening floor to avoid the 1/r singularity
+
+      function espColorFromPotential(phi, scale) {
+        // Diverging red (negative) → white (neutral) → blue (positive), APBS convention.
+        let t = phi / scale;
+        if (t > 1) t = 1; else if (t < -1) t = -1;
+        let r, g, b;
+        if (t >= 0) {
+          // white → blue
+          r = Math.round(255 + t * (43 - 255));
+          g = Math.round(255 + t * (79 - 255));
+          b = Math.round(255 + t * (214 - 255));
+        } else {
+          // white → red
+          const a = -t;
+          r = Math.round(255 + a * (226 - 255));
+          g = Math.round(255 + a * (77 - 255));
+          b = Math.round(255 + a * (77 - 255));
+        }
+        return (r << 16) | (g << 8) | b;
+      }
+
+      // Register a Mol* color theme that colors atoms by a continuous screened-Coulomb
+      // (Debye-Hückel) electrostatic potential — an APBS-like Poisson-Boltzmann proxy
+      // computed on-device. The molecular surface interpolates these per-atom values into a
+      // smooth potential map. Works on any PDB/mmCIF without partial-charge annotations.
+      function registerEspColorTheme() {
+        const plugin = window.molapp.viewer.plugin;
+        const registry = plugin.representation.structure.themes.colorThemeRegistry;
+        // registry.get() returns an empty fallback provider (never null) for unknown names,
+        // so detect prior registration by matching the returned provider's own name.
+        const existing = registry.get('molapp-esp');
+        if (existing && existing.name === 'molapp-esp') {
+          return;
+        }
+
+        const lib = window.molstar.lib.structure;
+        const SP = lib.StructureProperties;
+        const Location = lib.StructureElement.Location;
+        const NEUTRAL = 0xFFFFFF;
+
+        function factory(ctx) {
+          const structure = ctx && ctx.structure;
+          if (!structure) {
+            return {
+              factory: factory, granularity: 'group', color: function () { return NEUTRAL; },
+              props: {}, description: 'Electrostatic potential (no structure).'
+            };
+          }
+
+          // Pass 1: collect fixed point charges from the ionizable atoms.
+          const charges = []; // flat [x, y, z, q, x, y, z, q, ...]
+          const loc = Location.create(structure);
+          for (const unit of structure.units) {
+            if (unit.kind !== 0) continue; // 0 = atomic units; skip coarse-grained
+            loc.unit = unit;
+            const elements = unit.elements;
+            for (let i = 0, n = elements.length; i < n; i++) {
+              loc.element = elements[i];
+              const resn = SP.residue.label_comp_id(loc);
+              const atom = SP.atom.label_atom_id(loc);
+              let q = 0;
+              const table = ESP_ATOM_CHARGES[resn];
+              if (table && table[atom] !== undefined) q = table[atom];
+              else if (atom === 'OXT') q = -1.0; // C-terminal carboxylate
+              if (q !== 0) {
+                charges.push(SP.atom.x(loc), SP.atom.y(loc), SP.atom.z(loc), q);
+              }
+            }
+          }
+
+          // Pass 2: evaluate the screened-Coulomb potential at every atom and index it by
+          // (unit id, element) so color() is a cheap lookup during rendering.
+          const potential = new Map();
+          const absValues = [];
+          const invDebye = 1 / ESP_DEBYE_LENGTH;
+          for (const unit of structure.units) {
+            if (unit.kind !== 0) continue;
+            loc.unit = unit;
+            const elements = unit.elements;
+            for (let i = 0, n = elements.length; i < n; i++) {
+              loc.element = elements[i];
+              const px = SP.atom.x(loc), py = SP.atom.y(loc), pz = SP.atom.z(loc);
+              let phi = 0;
+              for (let c = 0; c < charges.length; c += 4) {
+                const dx = px - charges[c], dy = py - charges[c + 1], dz = pz - charges[c + 2];
+                let d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                if (d < ESP_MIN_DISTANCE) d = ESP_MIN_DISTANCE;
+                phi += charges[c + 3] * Math.exp(-d * invDebye) / d;
+              }
+              potential.set(unit.id + ':' + elements[i], phi);
+              absValues.push(Math.abs(phi));
+            }
+          }
+
+          // Normalize the color range to a robust magnitude (90th percentile) so a couple of
+          // buried charges don't saturate the whole map.
+          absValues.sort(function (a, b) { return a - b; });
+          let scale = absValues.length ? absValues[Math.floor(absValues.length * 0.9)] : 0;
+          if (!(scale > 0)) scale = 1;
+
+          return {
+            factory: factory,
+            granularity: 'group',
+            color: function (location) {
+              const phi = potential.get(location.unit.id + ':' + location.element);
+              return phi === undefined ? NEUTRAL : espColorFromPotential(phi, scale);
+            },
+            props: {},
+            description: 'Screened-Coulomb electrostatic potential (APBS-like).'
+          };
+        }
+
+        registry.add({
+          name: 'molapp-esp',
+          label: 'Electrostatic Potential',
+          category: 'Charge',
+          factory: factory,
+          getParams: function () { return {}; },
+          defaultValues: {},
+          isApplicable: function () { return true; }
+        });
       }
 
       function handlePencilHover(x, y) {
@@ -775,6 +1324,7 @@
           representation: null,
           visibility: {},
           selection: null,
+          morphing: false,
           objects: {},
           selectionVisualState: {
             selected: false,
@@ -782,6 +1332,7 @@
           }
         };
         bindSelectionUpdates(viewer);
+        try { registerEspColorTheme(); } catch (themeError) { console.error('[MolApp] ESP theme registration failed at init:', themeError); }
         document.documentElement.dataset.viewerState = 'ready';
         status.hidden = true;
       }
