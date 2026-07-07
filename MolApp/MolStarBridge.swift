@@ -18,6 +18,8 @@ enum MolStarCommandName: String, Codable {
     case stopMorph
     case superpose
     case secondaryStructure
+    case setMeasureMode
+    case clearMeasurements
 }
 
 struct MolStarCommandResult: Decodable {
@@ -135,6 +137,12 @@ final class MolStarBridge: NSObject, ObservableObject {
     @Published private(set) var lastErrorMessage: String?
     @Published private(set) var currentSelection: MoleculeSelection?
     @Published private(set) var objects: [MolAppObject] = []
+    // Apple Pencil hover: label comes from JS (Mol* hover), point from the native hover
+    // recognizer. Tooltip shows only when both are present, gating display to Pencil hover.
+    @Published private(set) var hoverLabel: String?
+    @Published private(set) var hoverPoint: CGPoint?
+    // Last completed distance measurement, as "atomA — atomB" (Å value shown on canvas by Mol*).
+    @Published private(set) var lastMeasurement: String?
 
     private weak var webView: WKWebView?
     private let encoder = JSONEncoder()
@@ -144,6 +152,11 @@ final class MolStarBridge: NSObject, ObservableObject {
 
     func attach(webView: WKWebView) {
         self.webView = webView
+    }
+
+    func updateHoverPoint(_ point: CGPoint?) {
+        hoverPoint = point
+        if point == nil, hoverLabel != nil { hoverLabel = nil }
     }
 
     func loadLocalStructure(data: String, format: String, label: String? = nil) {
@@ -217,6 +230,14 @@ final class MolStarBridge: NSObject, ObservableObject {
         send(.secondaryStructure, payload: TargetedPayload(targets: targets))
     }
 
+    func setMeasureMode(_ enabled: Bool, kind: String? = nil) {
+        send(.setMeasureMode, payload: MeasureModePayload(enabled: enabled, kind: kind))
+    }
+
+    func clearMeasurements() {
+        send(.clearMeasurements, payload: EmptyPayload())
+    }
+
     private func updateObject(name: String, update: (inout MolAppObject) -> Void) {
         if let idx = objects.firstIndex(where: { $0.name == name }) {
             update(&objects[idx])
@@ -272,6 +293,17 @@ final class MolStarBridge: NSObject, ObservableObject {
 
         if let dict = messageBody as? [String: Any], dict["event"] as? String == "selectionChanged" {
             currentSelection = try decoder.decode(MolStarSelectionEvent.self, from: data).selection
+            return
+        }
+
+        if let dict = messageBody as? [String: Any], dict["event"] as? String == "pencilHover" {
+            let label = dict["label"] as? String
+            if hoverLabel != label { hoverLabel = label }
+            return
+        }
+
+        if let dict = messageBody as? [String: Any], dict["event"] as? String == "measurement" {
+            lastMeasurement = dict["label"] as? String
             return
         }
 
@@ -347,6 +379,11 @@ private struct MorphPayload: Encodable {
     let durationInS: Double
     let loop: Bool
     let targets: [String]
+}
+
+private struct MeasureModePayload: Encodable {
+    let enabled: Bool
+    let kind: String?
 }
 
 extension Color {

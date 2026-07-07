@@ -1,5 +1,27 @@
 import SwiftUI
 
+enum MeasureKind: String, CaseIterable, Identifiable {
+    case distance, angle, dihedral
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .distance: "Distance"
+        case .angle:    "Angle"
+        case .dihedral: "Dihedral"
+        }
+    }
+
+    var atomCount: Int {
+        switch self {
+        case .distance: 2
+        case .angle:    3
+        case .dihedral: 4
+        }
+    }
+}
+
 struct MoleculeViewerView: View {
     @StateObject private var bridge = MolStarBridge()
     @State private var isFileImporterPresented = false
@@ -17,6 +39,7 @@ struct MoleculeViewerView: View {
     @State private var colorPickerTarget: String? = nil
     @State private var isMorphing = false
     @State private var isManualPresented = false
+    @State private var measureKind: MeasureKind? = nil
 
     var body: some View {
         ZStack {
@@ -92,6 +115,10 @@ struct MoleculeViewerView: View {
         .onReceive(bridge.$lastErrorMessage) { message in
             localErrorMessage = message
         }
+        .onReceive(bridge.$lastMeasurement) { label in
+            guard let label else { return }
+            statusMessage = "\(measureKind?.title ?? "Distance"): \(label)"
+        }
         .onReceive(bridge.$lastCommandResult) { result in
             guard let result, result.success else { return }
 
@@ -128,6 +155,36 @@ struct MoleculeViewerView: View {
     private var viewport: some View {
         MolStarWebView(bridge: bridge)
             .ignoresSafeArea()
+            .overlay(alignment: .topLeading) { hoverTooltip }
+            .overlay(alignment: .top) { measureBanner }
+    }
+
+    @ViewBuilder
+    private var measureBanner: some View {
+        if let kind = measureKind {
+            Label("\(kind.title) mode — tap \(kind.atomCount) atoms", systemImage: "ruler.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.blue.opacity(0.85), in: Capsule())
+                .padding(.top, 60)
+                .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var hoverTooltip: some View {
+        if let label = bridge.hoverLabel, let point = bridge.hoverPoint {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.black.opacity(0.8), in: Capsule())
+                .position(x: point.x, y: max(point.y - 28, 16))
+                .allowsHitTesting(false)
+        }
     }
 
     private var errorMessage: String? {
@@ -234,6 +291,27 @@ struct MoleculeViewerView: View {
                             systemImage: isMorphing ? "stop.circle" : "play.circle"
                         )
                     }
+                }
+            }
+
+            Menu("Measure") {
+                ForEach(MeasureKind.allCases) { kind in
+                    Button {
+                        toggleMeasure(kind)
+                    } label: {
+                        Label(
+                            "\(kind.title) Mode",
+                            systemImage: measureKind == kind ? "ruler.fill" : "ruler"
+                        )
+                    }
+                }
+
+                Button {
+                    localErrorMessage = nil
+                    bridge.clearMeasurements()
+                    statusMessage = "Measurements cleared"
+                } label: {
+                    Label("Clear Measurements", systemImage: "trash")
                 }
             }
 
@@ -407,6 +485,21 @@ struct MoleculeViewerView: View {
                 statusMessage = "Morphing trajectory…"
                 bridge.startMorph(loop: loop, targets: visibleStructureNames)
             }
+        case "measure", "dist":
+            let arg = components.count >= 2 ? components[1] : "distance"
+            switch arg {
+            case "clear":
+                bridge.clearMeasurements()
+                statusMessage = "Measurements cleared"
+            case "off":
+                if let kind = measureKind { toggleMeasure(kind) }
+            case "angle":
+                if measureKind != .angle { toggleMeasure(.angle) }
+            case "dihedral", "torsion":
+                if measureKind != .dihedral { toggleMeasure(.dihedral) }
+            default:
+                if measureKind != .distance { toggleMeasure(.distance) }
+            }
         default:
             localErrorMessage = "Unknown command: \(command)"
         }
@@ -442,6 +535,19 @@ struct MoleculeViewerView: View {
         selectedRepresentation = representation
         localErrorMessage = nil
         bridge.setRepresentation(representation.rawValue, targets: visibleStructureNames)
+    }
+
+    private func toggleMeasure(_ kind: MeasureKind) {
+        localErrorMessage = nil
+        if measureKind == kind {
+            measureKind = nil
+            bridge.setMeasureMode(false)
+            statusMessage = "Measure mode off"
+        } else {
+            measureKind = kind
+            bridge.setMeasureMode(true, kind: kind.rawValue)
+            statusMessage = "\(kind.title): tap \(kind.atomCount) atoms"
+        }
     }
 
     private func toggleVisibility(_ feature: MoleculeVisibilityFeature) {

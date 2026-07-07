@@ -96,9 +96,11 @@ struct MolStarWebView: UIViewRepresentable {
             switch gesture.state {
             case .began, .changed:
                 let pt = gesture.location(in: webView)
+                bridge.updateHoverPoint(pt)
                 let js = "window.molapp?.handlePencilHover?.(\(pt.x), \(pt.y));"
                 webView.evaluateJavaScript(js, completionHandler: nil)
             case .ended, .cancelled:
+                bridge.updateHoverPoint(nil)
                 webView.evaluateJavaScript("window.molapp?.handlePencilHoverEnd?.();", completionHandler: nil)
             default:
                 break

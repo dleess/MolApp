@@ -60,6 +60,15 @@ struct ManualView: View {
                 Command(syntax: "super", detail: "Superpose the visible structures"),
                 Command(syntax: "morph · morph stop", detail: "Start / stop trajectory morph")
             ]
+        ),
+        Section(
+            title: "Measure",
+            icon: "ruler",
+            body: "Pick a mode under Measure ▸ Distance / Angle / Dihedral, then tap 2 / 3 / 4 atoms with the Apple Pencil (or a finger) to draw the measurement — distance in ångströms, angle and dihedral in degrees. Keep tapping sets to add more. A blue banner shows while measuring; Clear Measurements removes them all.",
+            commands: [
+                Command(syntax: "measure · measure angle · measure dihedral", detail: "Enter distance / angle / dihedral mode"),
+                Command(syntax: "measure off · measure clear", detail: "Leave measure mode · remove all measurements")
+            ]
         )
     ]
 
