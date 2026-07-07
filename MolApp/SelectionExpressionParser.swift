@@ -1,0 +1,148 @@
+import Foundation
+
+struct SelectionExpressionParser {
+    let tokens: [String]
+    var index = 0
+
+    init(expression: String) {
+        let symbols = ["&", "|", "!", "(", ")"]
+        var expr = expression
+        for s in symbols {
+            expr = expr.replacingOccurrences(of: s, with: " \(s) ")
+        }
+        self.tokens = expr.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+    }
+
+    mutating func parse() throws -> SelectionAST {
+        let ast = try parseOr()
+        if index < tokens.count {
+            throw ParserError.unexpectedToken(tokens[index])
+        }
+        return ast
+    }
+
+    private mutating func parseOr() throws -> SelectionAST {
+        var node = try parseAnd()
+        while index < tokens.count && (tokens[index] == "|" || tokens[index] == "or") {
+            index += 1
+            let right = try parseAnd()
+            node = SelectionAST(kind: .or, left: [node], right: [right], operand: nil, value: nil)
+        }
+        return node
+    }
+
+    private mutating func parseAnd() throws -> SelectionAST {
+        var node = try parseNot()
+        while index < tokens.count && (tokens[index] == "&" || tokens[index] == "and") {
+            index += 1
+            let right = try parseNot()
+            node = SelectionAST(kind: .and, left: [node], right: [right], operand: nil, value: nil)
+        }
+        return node
+    }
+
+    private mutating func parseNot() throws -> SelectionAST {
+        if index < tokens.count && tokens[index] == "!" {
+            index += 1
+            let operand = try parseNot()
+            return SelectionAST(kind: .not, left: nil, right: nil, operand: [operand], value: nil)
+        }
+        return try parsePrimary()
+    }
+
+    private mutating func parsePrimary() throws -> SelectionAST {
+        guard index < tokens.count else {
+            throw ParserError.unexpectedEOF
+        }
+
+        let token = tokens[index]
+        if token == "(" {
+            index += 1
+            let node = try parseOr()
+            guard index < tokens.count && tokens[index] == ")" else {
+                throw ParserError.missingClosingParen
+            }
+            index += 1
+            return node
+        }
+
+        if token == "chain" {
+            index += 1
+            guard index < tokens.count else { throw ParserError.missingValue("chain") }
+            let value = tokens[index].uppercased()
+            index += 1
+            return SelectionAST(kind: .chain, left: nil, right: nil, operand: nil, value: value)
+        } else if token == "residue" {
+            index += 1
+            guard index < tokens.count else { throw ParserError.missingValue("residue") }
+            let value = tokens[index]
+            index += 1
+            return SelectionAST(kind: .residue, left: nil, right: nil, operand: nil, value: value)
+        } else if token == "atom" {
+            index += 1
+            guard index < tokens.count else { throw ParserError.missingValue("atom") }
+            let value = tokens[index].uppercased()
+            index += 1
+            return SelectionAST(kind: .atom, left: nil, right: nil, operand: nil, value: value)
+        } else if token == "res" {
+            index += 1
+            guard index < tokens.count else { throw ParserError.missingValue("res") }
+            let value = tokens[index]
+            index += 1
+            if value.contains("-") {
+                return SelectionAST(kind: .residueRange, left: nil, right: nil, operand: nil, value: value)
+            } else {
+                return SelectionAST(kind: .residue, left: nil, right: nil, operand: nil, value: value)
+            }
+        } else if token == "resn" {
+            index += 1
+            guard index < tokens.count else { throw ParserError.missingValue("resn") }
+            let value = tokens[index].uppercased()
+            index += 1
+            return SelectionAST(kind: .residueName, left: nil, right: nil, operand: nil, value: value)
+        } else if token == "model" {
+            index += 1
+            guard index < tokens.count else { throw ParserError.missingValue("model") }
+            let value = tokens[index]
+            index += 1
+            return SelectionAST(kind: .model, left: nil, right: nil, operand: nil, value: value)
+        }
+
+        throw ParserError.unexpectedToken(token)
+    }
+
+    static let selectionKeywords: Set<String> = [
+        "chain", "residue", "res", "resn", "atom", "model", "not", "and", "or"
+    ]
+
+    static func extractName(from afterSelect: String) -> (name: String, expression: String) {
+        let parts = afterSelect.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        if parts.count >= 2 && !selectionKeywords.contains(parts[0].lowercased()) {
+            return (parts[0], parts.dropFirst().joined(separator: " "))
+        }
+        return ("sele", afterSelect)
+    }
+
+    enum ParserError: Error, LocalizedError {
+        case unexpectedToken(String)
+        case unexpectedEOF
+        case missingClosingParen
+        case missingValue(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .unexpectedToken(let t): "Unexpected token: \(t)"
+            case .unexpectedEOF: "Unexpected end of expression"
+            case .missingClosingParen: "Missing closing parenthesis"
+            case .missingValue(let t): "Missing value for \(t)"
+            }
+        }
+    }
+}
+
+extension String {
+    func dropping(first count: Int) -> String {
+        guard count <= self.count else { return "" }
+        return String(self.dropFirst(count))
+    }
+}

@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Xcode / build artifacts
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Xcode user-specific workspace state
+MolApp.xcodeproj/project.xcworkspace/xcuserdata/
+MolApp.xcodeproj/xcuserdata/
