@@ -96,6 +96,15 @@
         }
       }
 
+      let lastHoverLabel = null;
+      function postPencilHover(label) {
+        if (label === lastHoverLabel) return;
+        lastHoverLabel = label;
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
+          window.webkit.messageHandlers.molapp.postMessage({ event: 'pencilHover', label });
+        }
+      }
+
       function structureCount() {
         if (!window.molapp || !window.molapp.viewer) {
           return 0;
@@ -779,6 +788,24 @@
           window.molapp.superposeRmsd = bestRmsd;
           window.molapp.superposeCore = smallestCore;
           await resetCamera();
+        },
+        setMeasureMode: async function (payload) {
+          const enabled = Boolean(payload.enabled);
+          const plugin = window.molapp.viewer.plugin;
+          window.molapp.measurePending = [];
+          window.molapp.measureKind = payload.kind || 'distance';
+          if (enabled && !window.molapp.measureMode) {
+            // Pick individual atoms (not whole residues) so measurements are atom-to-atom.
+            window.molapp.prevGranularity = plugin.managers.interactivity.props.granularity;
+            plugin.managers.interactivity.setProps({ granularity: 'element' });
+          } else if (!enabled && window.molapp.measureMode) {
+            plugin.managers.interactivity.setProps({ granularity: window.molapp.prevGranularity || 'residue' });
+            plugin.managers.interactivity.lociHighlights.clearHighlights();
+          }
+          window.molapp.measureMode = enabled;
+        },
+        clearMeasurements: async function () {
+          await clearMeasurementsInternal();
         }
       };
 
@@ -1249,14 +1276,103 @@
         await window.molapp.viewer.plugin.managers.structure.component.removeRepresentations([comp]);
       }
 
+      function postMeasurement(label) {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
+          window.webkit.messageHandlers.molapp.postMessage({ event: 'measurement', label });
+        }
+      }
+
+      // Atoms needed before a measurement is drawn: distance 2, angle 3, dihedral 4.
+      function measureTargetCount(kind) {
+        return kind === 'angle' ? 3 : kind === 'dihedral' ? 4 : 2;
+      }
+
+      // In measure mode each atom tap is collected; once enough atoms for the current kind are
+      // picked, Mol* draws the measurement (line/arc + on-canvas value) and the labels go to native.
+      function handleMeasurePick(loci) {
+        const SE = window.molstar && window.molstar.lib && window.molstar.lib.structure
+          ? window.molstar.lib.structure.StructureElement : null;
+        if (!SE || !SE.Loci.is(loci) || SE.Loci.isEmpty(loci)) return;
+        const atom = SE.Loci.firstElement(loci);
+        const sel = selectionFromLoci(atom);
+        const label = sel ? sel.label : null;
+        const pending = window.molapp.measurePending || (window.molapp.measurePending = []);
+        // Compare loci identity, not the display label: labels are null for unnamed atoms
+        // (water/ion) and omit model number, so distinct atoms can share a label. Reject a
+        // repeat tap on the atom just picked (consecutive duplicate).
+        if (pending.length && SE.Loci.areEqual(pending[pending.length - 1].loci, atom)) return;
+        pending.push({ loci: atom, label });
+        window.molapp.viewer.plugin.managers.interactivity.lociHighlights.highlightOnly({ loci: atom }, true);
+        const target = measureTargetCount(window.molapp.measureKind);
+        if (pending.length >= target) {
+          const picks = pending.slice(0, target);
+          window.molapp.measurePending = [];
+          addMeasurement(window.molapp.measureKind, picks);
+        }
+      }
+
+      async function addMeasurement(kind, picks) {
+        try {
+          const m = window.molapp.viewer.plugin.managers.structure.measurement;
+          const l = picks.map(function (p) { return p.loci; });
+          if (kind === 'angle') {
+            await m.addAngle(l[0], l[1], l[2]);
+          } else if (kind === 'dihedral') {
+            await m.addDihedral(l[0], l[1], l[2], l[3]);
+          } else {
+            await m.addDistance(l[0], l[1]);
+          }
+          postMeasurement(picks.map(function (p) { return p.label || '?'; }).join(' — '));
+        } catch (error) {
+          const message = error && error.message ? error.message : String(error);
+          postCommandResult({ id: 'measure', command: 'measureDistance', success: false, error: message });
+        } finally {
+          window.molapp.viewer.plugin.managers.interactivity.lociHighlights.clearHighlights();
+        }
+      }
+
+      // Mol* stores every distance/angle under cells tagged 'measurement-group'; deleting those
+      // refs removes all measurements (same ref-delete pattern as surface potential / superpose).
+      async function clearMeasurementsInternal() {
+        window.molapp.measurePending = [];
+        const plugin = window.molapp.viewer.plugin;
+        const refs = [];
+        plugin.state.data.cells.forEach(function (cell) {
+          const tags = cell.transform && cell.transform.tags;
+          if (Array.isArray(tags) && tags.indexOf('measurement-group') !== -1) {
+            refs.push(cell.transform.ref);
+          }
+        });
+        if (!refs.length) return;
+        const build = plugin.state.data.build();
+        refs.forEach(function (ref) { build.delete(ref); });
+        await build.commit();
+      }
+
       function bindSelectionUpdates(viewer) {
         viewer.plugin.behaviors.interaction.click.subscribe(function (event) {
           const loci = event && event.current ? event.current.loci : null;
+          if (window.molapp && window.molapp.measureMode) {
+            handleMeasurePick(loci);
+            return;
+          }
           setMolAppSelection(selectionFromLoci(loci), loci);
+        });
+        // Pencil hover: Mol* re-emits hover as the highlighted target changes. Native gates
+        // display to Apple Pencil hover only (touch never triggers the hover recognizer).
+        viewer.plugin.behaviors.interaction.hover.subscribe(function (event) {
+          const loci = event && event.current ? event.current.loci : null;
+          const sel = loci ? selectionFromLoci(loci) : null;
+          postPencilHover(sel ? sel.label : null);
         });
       }
 
       async function focusSelectedRegionFromDoubleTap(event) {
+        // In measure mode the two quick atom taps look like a double-tap; don't refocus
+        // the (stale) selection and lurch the camera mid-measurement.
+        if (window.molapp && window.molapp.measureMode) {
+          return;
+        }
         if (!window.molapp || !window.molapp.selection) {
           return;
         }
@@ -1325,6 +1441,10 @@
           visibility: {},
           selection: null,
           morphing: false,
+          measureMode: false,
+          measureKind: 'distance',
+          measurePending: [],
+          prevGranularity: null,
           objects: {},
           selectionVisualState: {
             selected: false,
