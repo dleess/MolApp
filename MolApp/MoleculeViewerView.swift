@@ -128,10 +128,15 @@ struct MoleculeViewerView: View {
                 statusMessage = "Loaded \(label)"
                 bridge.addObject(MolAppObject(name: label, type: .structure))
                 pendingStructureLabel = nil
+                visibilityStates = [.water: true, .ligand: true]
             case .loadPdbId:
-                let name = pdbIdText.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                statusMessage = "Loaded \(PdbIdentifier.displayName(from: pdbIdText))"
+                // Use the label captured at send time, not the live field — the field may have
+                // changed during the async fetch, which would name the object off the JS key.
+                let name = pendingStructureLabel ?? pdbIdText.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                statusMessage = "Loaded \(name)"
                 bridge.addObject(MolAppObject(name: name, type: .structure))
+                pendingStructureLabel = nil
+                visibilityStates = [.water: true, .ligand: true]
             case .setRepresentation:
                 statusMessage = "\(selectedRepresentation.title) representation"
             case .surfacePotential:
@@ -392,6 +397,9 @@ struct MoleculeViewerView: View {
 
         commandText = ""
         let components = input.lowercased().components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        // Object names (PDB IDs, file labels) are stored case-sensitively (uppercase for PDB IDs),
+        // so keep an original-case token list for name arguments — only keywords are lowercased.
+        let rawComponents = input.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         guard let command = components.first else { return }
 
         switch command {
@@ -405,8 +413,8 @@ struct MoleculeViewerView: View {
         case "repr":
             if components.count >= 3 {
                 let reprStr = components[1]
-                let objName = components[2]
-                if let repr = ObjectRepresentation(rawValue: reprStr) {
+                let objName = rawComponents[2]
+                if let repr = ObjectRepresentation.allCases.first(where: { $0.rawValue.lowercased() == reprStr }) {
                     bridge.setObjectRepresentation(name: objName, representation: repr)
                 } else {
                     localErrorMessage = "Invalid representation. Use: \(ObjectRepresentation.allCases.map(\.rawValue).joined(separator: ", "))"
@@ -429,7 +437,7 @@ struct MoleculeViewerView: View {
                         toggleVisibility(feature)
                     }
                 } else {
-                    bridge.setObjectVisibility(name: arg, isVisible: isVisible)
+                    bridge.setObjectVisibility(name: rawComponents[1], isVisible: isVisible)
                 }
             } else {
                 localErrorMessage = "Usage: \(command) [water|ligand|objectname]"
@@ -441,7 +449,9 @@ struct MoleculeViewerView: View {
             } else {
                 let (selectionName, expression) = SelectionExpressionParser.extractName(from: afterSelect)
                 do {
-                    var parser = SelectionExpressionParser(expression: expression.lowercased())
+                    // Keep original case: the parser lowercases only keyword tokens, so chain IDs
+                    // (which can be lowercase, e.g. large-assembly auth_asym_id) survive.
+                    var parser = SelectionExpressionParser(expression: expression)
                     let ast = try parser.parse()
                     let selection = MoleculeSelection(type: "expression", label: "\(selectionName): \(expression)", ast: ast)
                     bridge.setSelection(selection)
@@ -453,7 +463,7 @@ struct MoleculeViewerView: View {
         case "color":
             if components.count >= 3 {
                 let colorArg = components[1]
-                let objName = components[2]
+                let objName = rawComponents[2]
                 let colorHex: String? = colorArg == "default" ? nil : colorNameToHex(colorArg)
                 bridge.setObjectColor(name: objName, colorHex: colorHex)
             } else {

@@ -267,8 +267,11 @@
             return atoms({
               residueTest: function (ctx) {
                 const loc = ctx.element;
-                const value = props.residue.auth_seq_id(loc) || props.residue.label_seq_id(loc);
-                return value >= rangeStart && value <= rangeEnd;
+                // Test both numberings (mirror the single-residue case) — `a || b` would drop a
+                // valid residue numbered 0 by treating it as falsy.
+                const auth = props.residue.auth_seq_id(loc);
+                const label = props.residue.label_seq_id(loc);
+                return (auth >= rangeStart && auth <= rangeEnd) || (label >= rangeStart && label <= rangeEnd);
               }
             });
           }
@@ -403,9 +406,10 @@
 
           for (const s of structures) {
             const components = s.components.filter(c => {
-              // Mol* standard presets use these tags for water and ligand components
-              const tags = c.cell.obj.tags;
-              return tags && tags.includes(feature);
+              // Mol* tags the static water/ligand components on the transform as
+              // `structure-component-static-<feature>` (cell.obj carries no tags).
+              const tags = c.cell.transform.tags;
+              return Array.isArray(tags) && tags.indexOf('structure-component-static-' + feature) !== -1;
             });
 
             if (components.length > 0) {
@@ -709,8 +713,10 @@
 
         stopMorph: async function () {
           const plugin = window.molapp.viewer.plugin;
-          await plugin.managers.animation.stop();
+          // Clear the flag before stop() so the isAnimating subscription doesn't also fire a
+          // synthetic stop result for this same, user-initiated stop.
           window.molapp.morphing = false;
+          await plugin.managers.animation.stop();
         },
 
         secondaryStructure: async function (payload) {
@@ -1452,6 +1458,14 @@
           }
         };
         bindSelectionUpdates(viewer);
+        // A non-looping morph self-completes (fixed duration); Mol* flips isAnimating false but
+        // sends native no signal. Reuse the stopMorph result path to reset the morph UI state.
+        viewer.plugin.behaviors.state.isAnimating.subscribe(function (animating) {
+          if (!animating && window.molapp && window.molapp.morphing) {
+            window.molapp.morphing = false;
+            postCommandResult({ id: 'morph-auto-stop', command: 'stopMorph', success: true });
+          }
+        });
         try { registerEspColorTheme(); } catch (themeError) { console.error('[MolApp] ESP theme registration failed at init:', themeError); }
         document.documentElement.dataset.viewerState = 'ready';
         status.hidden = true;
