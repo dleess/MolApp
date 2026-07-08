@@ -23,7 +23,7 @@ struct SelectionExpressionParser {
 
     private mutating func parseOr() throws -> SelectionAST {
         var node = try parseAnd()
-        while index < tokens.count && (tokens[index] == "|" || tokens[index] == "or") {
+        while index < tokens.count && (tokens[index] == "|" || tokens[index].lowercased() == "or") {
             index += 1
             let right = try parseAnd()
             node = SelectionAST(kind: .or, left: [node], right: [right], operand: nil, value: nil)
@@ -33,7 +33,7 @@ struct SelectionExpressionParser {
 
     private mutating func parseAnd() throws -> SelectionAST {
         var node = try parseNot()
-        while index < tokens.count && (tokens[index] == "&" || tokens[index] == "and") {
+        while index < tokens.count && (tokens[index] == "&" || tokens[index].lowercased() == "and") {
             index += 1
             let right = try parseNot()
             node = SelectionAST(kind: .and, left: [node], right: [right], operand: nil, value: nil)
@@ -42,7 +42,7 @@ struct SelectionExpressionParser {
     }
 
     private mutating func parseNot() throws -> SelectionAST {
-        if index < tokens.count && tokens[index] == "!" {
+        if index < tokens.count && (tokens[index] == "!" || tokens[index].lowercased() == "not") {
             index += 1
             let operand = try parseNot()
             return SelectionAST(kind: .not, left: nil, right: nil, operand: [operand], value: nil)
@@ -55,7 +55,8 @@ struct SelectionExpressionParser {
             throw ParserError.unexpectedEOF
         }
 
-        let token = tokens[index]
+        let raw = tokens[index]
+        let token = raw.lowercased()
         if token == "(" {
             index += 1
             let node = try parseOr()
@@ -69,7 +70,8 @@ struct SelectionExpressionParser {
         if token == "chain" {
             index += 1
             guard index < tokens.count else { throw ParserError.missingValue("chain") }
-            let value = tokens[index].uppercased()
+            // Preserve case: chain IDs are case-sensitive (e.g. distinct A vs a in large assemblies).
+            let value = tokens[index]
             index += 1
             return SelectionAST(kind: .chain, left: nil, right: nil, operand: nil, value: value)
         } else if token == "residue" {
@@ -89,7 +91,9 @@ struct SelectionExpressionParser {
             guard index < tokens.count else { throw ParserError.missingValue("res") }
             let value = tokens[index]
             index += 1
-            if value.contains("-") {
+            // A range needs an interior hyphen ("3-42"); a leading-only hyphen is a negative
+            // single residue ("-5"), not a range.
+            if value.dropFirst().contains("-") {
                 return SelectionAST(kind: .residueRange, left: nil, right: nil, operand: nil, value: value)
             } else {
                 return SelectionAST(kind: .residue, left: nil, right: nil, operand: nil, value: value)

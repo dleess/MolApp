@@ -235,6 +235,30 @@ final class MolStarBridgeTests: XCTestCase {
         XCTAssertEqual(ast.value, "3-42")
     }
 
+    func testSelectionExpressionParserTreatsNegativeResAsSingleResidue() throws {
+        var parser = SelectionExpressionParser(expression: "res -5")
+        let ast = try parser.parse()
+        XCTAssertEqual(ast.kind, .residue)
+        XCTAssertEqual(ast.value, "-5")
+    }
+
+    func testSelectionExpressionParserHandlesNotTextKeyword() throws {
+        var parser = SelectionExpressionParser(expression: "not chain a")
+        let ast = try parser.parse()
+        XCTAssertEqual(ast.kind, .not)
+        XCTAssertEqual(ast.operand?[0].kind, .chain)
+        XCTAssertEqual(ast.operand?[0].value, "a")
+    }
+
+    func testSelectionExpressionParserPreservesChainCase() throws {
+        var lower = SelectionExpressionParser(expression: "chain a")
+        XCTAssertEqual(try lower.parse().value, "a")
+        var upper = SelectionExpressionParser(expression: "CHAIN B")
+        let ast = try upper.parse()
+        XCTAssertEqual(ast.kind, .chain)
+        XCTAssertEqual(ast.value, "B")
+    }
+
     func testSelectionExpressionParserHandlesResnTerm() throws {
         var parser = SelectionExpressionParser(expression: "resn ala")
         let ast = try parser.parse()
@@ -261,8 +285,8 @@ final class MolStarBridgeTests: XCTestCase {
         var parser = SelectionExpressionParser(expression: "chain a or chain b")
         let ast = try parser.parse()
         XCTAssertEqual(ast.kind, .or)
-        XCTAssertEqual(ast.left?[0].value, "A")
-        XCTAssertEqual(ast.right?[0].value, "B")
+        XCTAssertEqual(ast.left?[0].value, "a")
+        XCTAssertEqual(ast.right?[0].value, "b")
     }
 
     func testExtractNameWhenFirstTokenIsNotKeyword() {
