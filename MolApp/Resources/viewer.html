@@ -159,6 +159,28 @@
         return result;
       }
 
+      // Mol* has no standalone "stick" representation. Sticks-only = ball-and-stick with the
+      // element-sphere visual removed, so Stick differs from Ball+Stick (which keeps the spheres).
+      const BALL_AND_STICK_VISUALS = ['element-sphere', 'intra-bond', 'inter-bond'];
+      const STICK_ONLY_VISUALS = ['intra-bond', 'inter-bond'];
+
+      // The atomic-detail preset (and the ball-and-stick reprType) always draw spheres. Patch the
+      // ball-and-stick representations on a structure so Stk hides them and B+S keeps them.
+      async function applyBallAndStickVisuals(target, sticksOnly) {
+        if (!target || !target.components) return;
+        const plugin = window.molapp.viewer.plugin;
+        const visuals = sticksOnly ? STICK_ONLY_VISUALS : BALL_AND_STICK_VISUALS;
+        for (const comp of target.components) {
+          for (const repr of (comp.representations || [])) {
+            if (repr?.cell?.transform?.params?.type?.name !== 'ball-and-stick') continue;
+            await plugin.managers.structure.component.updateRepresentations(
+              [comp], repr,
+              (old) => { if (old.type && old.type.params) old.type.params.visuals = visuals.slice(); }
+            );
+          }
+        }
+      }
+
       async function applyRepresentationPreset(representation, structures) {
         const presetByRepresentation = {
           ribbon: 'preset-structure-representation-polymer-cartoon',
@@ -178,6 +200,13 @@
         }
 
         await window.molapp.viewer.plugin.managers.structure.component.applyPreset(targets, preset);
+        if (representation === 'stick') {
+          const refIds = new Set(targets.map(t => t.cell.transform.ref));
+          const current = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
+          for (const s of current) {
+            if (refIds.has(s.cell.transform.ref)) await applyBallAndStickVisuals(s, true);
+          }
+        }
         window.molapp.representation = representation;
         await resetCamera();
       }
@@ -570,7 +599,11 @@
             const target = findStructureObject(name);
             if (!target) return;
             await plugin.managers.structure.component.applyPreset([target], preset);
-            obj.structureRef = findStructureObject(name) || target;
+            const refreshed = findStructureObject(name) || target;
+            obj.structureRef = refreshed;
+            if (representation === 'stick' || representation === 'ballAndStick') {
+              await applyBallAndStickVisuals(refreshed, representation === 'stick');
+            }
           } else if (obj.type === 'selection' && obj.loci) {
             const structures = plugin.managers.structure.hierarchy.current.structures;
             if (!structures.length) return;
@@ -581,6 +614,11 @@
               ballAndStick: 'ball-and-stick'
             };
             const reprType = reprTypeMap[representation] || 'cartoon';
+            const typeParams = representation === 'stick'
+              ? { visuals: STICK_ONLY_VISUALS.slice() }
+              : representation === 'ballAndStick'
+                ? { visuals: BALL_AND_STICK_VISUALS.slice() }
+                : null;
             if (obj.bundle) {
               let comp = findSelectionComponent(name);
               if (!comp) {
@@ -600,6 +638,7 @@
                   comp.cell,
                   {
                     type: reprType,
+                    ...(typeParams ? { typeParams } : {}),
                     color: 'uniform',
                     colorParams: { value: colorVal }
                   }
