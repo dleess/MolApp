@@ -499,7 +499,7 @@
                 {
                   type: 'cartoon',
                   color: 'uniform',
-                  colorParams: { value: 0x4488FF }
+                  colorParams: { value: 0x0072B2 } // Okabe-Ito blue
                 }
               );
               window.molapp.objects[selName] = {
@@ -595,7 +595,7 @@
               if (comp?.cell) {
                 await clearComponentRepresentations(comp);
                 const colorHex = obj.colorHex || null;
-                const colorVal = colorHex ? hexToMolStarColor(colorHex) : 0x4488FF;
+                const colorVal = colorHex ? hexToMolStarColor(colorHex) : 0x0072B2; // Okabe-Ito blue
                 await plugin.builders.structure.representation.addRepresentation(
                   comp.cell,
                   {
