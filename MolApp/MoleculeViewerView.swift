@@ -568,10 +568,14 @@ struct MoleculeViewerView: View {
         bridge.toggleVisibility(feature: feature.rawValue, isVisible: isVisible)
     }
 
+    // Okabe-Ito colorblind-safe qualitative palette. Command names keep their familiar
+    // labels; the hexes map to the nearest Okabe-Ito hue so every swatch stays
+    // distinguishable under deuteranopia/protanopia. "white" is the light neutral in place
+    // of Okabe-Ito black (invisible on the dark viewport).
     private static let namedColors: [String: String] = [
-        "red": "#FF4444", "green": "#44FF44", "blue": "#4444FF",
-        "yellow": "#FFFF44", "white": "#FFFFFF", "cyan": "#44FFFF",
-        "magenta": "#FF44FF", "orange": "#FF8844"
+        "red": "#D55E00", "green": "#009E73", "blue": "#0072B2",
+        "yellow": "#F0E442", "white": "#FFFFFF", "cyan": "#56B4E9",
+        "magenta": "#CC79A7", "orange": "#E69F00"
     ]
 
     private func colorNameToHex(_ name: String) -> String {
