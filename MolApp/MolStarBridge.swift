@@ -310,6 +310,31 @@ final class MolStarBridge: NSObject, ObservableObject {
             return
         }
 
+        // JS split a structure's ligands into per-residue objects (e.g. NAP/JBC/SO4). Surface each
+        // as a selection object so it gets its own eye/representation/color row in the Objects panel.
+        // addObject is idempotent by name, so a re-split after a representation change won't duplicate.
+        if let dict = messageBody as? [String: Any], dict["event"] as? String == "objectsAdded",
+           let arr = dict["objects"] as? [[String: Any]] {
+            for object in arr {
+                guard let name = object["name"] as? String else { continue }
+                let representation = (object["representation"] as? String)
+                    .flatMap(ObjectRepresentation.init(rawValue:)) ?? .ballAndStick
+                addObject(MolAppObject(name: name, type: .selection, isVisible: true, representation: representation))
+            }
+            return
+        }
+
+        // The master Ligand toggle changes per-ligand visibility in JS; mirror it onto the rows so
+        // the panel eye icons follow (they are separate native controls from the master toggle).
+        if let dict = messageBody as? [String: Any], dict["event"] as? String == "objectsVisibility",
+           let arr = dict["items"] as? [[String: Any]] {
+            for item in arr {
+                guard let name = item["name"] as? String, let isVisible = item["isVisible"] as? Bool else { continue }
+                updateObject(name: name) { $0.isVisible = isVisible }
+            }
+            return
+        }
+
         receive(result: try decoder.decode(MolStarCommandResult.self, from: data))
     }
 }

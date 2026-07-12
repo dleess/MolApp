@@ -217,6 +217,9 @@
           }
         }
         window.molapp.representation = representation;
+        // applyPreset rebuilt the lumped het components visible — re-split so per-ligand
+        // visibility survives a representation change (no re-post; rows already exist).
+        await refreshLigandSplit(false);
         await resetCamera();
       }
 
@@ -409,6 +412,7 @@
             type: 'structure',
             structureRef: structures[structures.length - 1]
           };
+          await refreshLigandSplit(true);
         },
         loadPdbId: async function (payload) {
           const pdbId = String(payload.pdbId || '').trim();
@@ -428,6 +432,7 @@
             type: 'structure',
             structureRef: structures[structures.length - 1]
           };
+          await refreshLigandSplit(true);
         },
         setRepresentation: async function (payload) {
           await applyRepresentationPreset(payload.representation || '', targetStructures(payload));
@@ -441,6 +446,30 @@
 
           const plugin = window.molapp.viewer.plugin;
           const structures = plugin.managers.structure.hierarchy.current.structures;
+
+          // When ligands were split into per-ligand components, the master Ligand toggle drives
+          // those (the lumped het components are hidden) rather than the lumped component, which
+          // no longer renders anything. Keeps "Show/Hide Ligand" working after a split.
+          if (feature === 'ligand' && Array.isArray(window.molapp.ligandResns) && window.molapp.ligandResns.length) {
+            const synced = [];
+            for (const name of window.molapp.ligandResns) {
+              const comp = findSelectionComponent(name);
+              if (comp && Boolean(comp.cell.state.isHidden) === isVisible) {
+                plugin.managers.structure.component.toggleVisibility([comp]);
+              }
+              const o = window.molapp.objects[name];
+              if (o) o.isHidden = !isVisible;
+              synced.push({ name: name, isVisible: isVisible });
+            }
+            // Keep the lumped het components hidden so "Show Ligand" never resurrects a double-render.
+            for (const s of structures) {
+              const stillVisible = ligandLumpComponents(s).filter(c => !Boolean(c.cell.state.isHidden));
+              if (stillVisible.length) plugin.managers.structure.component.toggleVisibility(stillVisible);
+            }
+            // Sync the per-ligand row eyes to the master toggle (they are separate native controls).
+            postObjectVisibility(synced);
+            return;
+          }
 
           for (const s of structures) {
             const components = s.components.filter(c => {
@@ -587,6 +616,8 @@
                 plugin.managers.structure.component.toggleVisibility([comp]);
               }
             }
+            // Remember desired visibility so a re-split (after a repr change) can restore it.
+            obj.isHidden = !isVisible;
           }
         },
 
@@ -615,6 +646,9 @@
             if (representation === 'stick' || representation === 'ballAndStick' || representation === 'sphere') {
               await applyAtomicRepresentation(refreshed, representation);
             }
+            // applyPreset on this structure rebuilt its lumped het components — re-split so the
+            // per-ligand rows stay in control (no double-render) after a structure repr change.
+            await refreshLigandSplit(false);
           } else if (obj.type === 'selection' && obj.loci) {
             const structures = plugin.managers.structure.hierarchy.current.structures;
             if (!structures.length) return;
@@ -799,6 +833,8 @@
             }
           }
           window.molapp.representation = 'secondary-structure';
+          // The cartoon preset rebuilt the lumped het components — re-split to keep per-ligand rows.
+          await refreshLigandSplit(false);
           await resetCamera();
         },
 
@@ -1288,6 +1324,144 @@
           bubbles: true,
           cancelable: true
         }));
+      }
+
+      // Mol* lumps every non-water het into a couple of components (static-ligand, static-ion, …),
+      // so there is no per-ligand visibility. When a structure has more than one distinct ligand
+      // residue, split them: one bundle component per residue name (all copies collapsed), each
+      // registered as a 'selection' object so it gets its own eye/representation/color row in the
+      // Objects panel for free. The lumped het components are HIDDEN (not deleted) so they stay as
+      // the enumeration source and never double-render alongside the per-ligand components.
+      //
+      // Idempotent: safe to call repeatedly. applyPreset (representation changes, secondary
+      // structure) rebuilds the lumped components visible, so we re-run this after those to
+      // re-split and re-hide. Returns the newly-listed ligand groups for the native panel.
+      // Exclude non-ligand static components: water, polymer, coarse, and the atomic-detail preset's
+      // catch-all 'all' component (which holds the whole structure — enumerating it would create a
+      // bundle per amino acid). Ligand/ion/lipid/branched remain as the het enumeration source.
+      const LIGAND_LUMP_EXCLUDE = ['static-water', 'static-polymer', 'static-coarse', 'static-all', 'static-nucleic'];
+
+      function ligandLumpComponents(structure) {
+        return (structure.components || []).filter(function (c) {
+          const tags = c.cell && c.cell.transform && c.cell.transform.tags;
+          if (!Array.isArray(tags)) return false;
+          return tags.some(function (t) {
+            return t.indexOf('structure-component-static-') === 0
+              && !LIGAND_LUMP_EXCLUDE.some(function (ex) { return t.indexOf(ex) !== -1; });
+          });
+        });
+      }
+
+      async function ensureLigandSplit() {
+        const plugin = window.molapp.viewer.plugin;
+        const lib = window.molstar.lib.structure;
+        const SP = lib.StructureProperties;
+        const structures = plugin.managers.structure.hierarchy.current.structures;
+        if (!structures.length) return [];
+        // ponytail: single-structure scope — split the most-recently-loaded structure (the load
+        // handlers register their object against structures[last], so match that). Per-structure
+        // ligand control would need per-structure state maps; not needed for the single-complex flow.
+        const s = structures[structures.length - 1];
+        const data = s.cell.obj && s.cell.obj.data;
+        if (!data) return [];
+
+        const lumped = ligandLumpComponents(s);
+        // Enumerate residue names from the lumped het components (not a raw HETATM scan) so water
+        // and modified polymer residues, already classified elsewhere by Mol*, are excluded for free.
+        const resns = new Set();
+        const loc = lib.StructureElement.Location.create(data);
+        for (const comp of lumped) {
+          const cdata = comp.cell.obj && comp.cell.obj.data;
+          if (!cdata) continue;
+          for (const unit of cdata.units) {
+            if (unit.kind !== 0) continue;
+            loc.unit = unit;
+            const els = unit.elements;
+            for (let i = 0, n = els.length; i < n; i++) {
+              loc.element = els[i];
+              resns.add(SP.residue.label_comp_id(loc));
+            }
+          }
+        }
+        // The polymer-cartoon preset (Ribbon / secondary structure) creates ONLY the polymer, so
+        // there are no het components to enumerate from and it deletes the per-ligand bundles. Fall
+        // back to the residue names cached from the first split so a repr change re-creates the
+        // ligands instead of dropping them. Bundles below are built from the full structure `data`,
+        // which always holds every atom regardless of which components currently exist.
+        if (resns.size === 0 && Array.isArray(window.molapp.ligandResns)) {
+          for (const r of window.molapp.ligandResns) resns.add(r);
+        }
+        if (resns.size <= 1) return []; // 0 or 1 ligand: keep Mol* default + the master toggle
+        window.molapp.ligandResns = Array.from(resns);
+
+        const made = [];
+        for (const resn of resns) {
+          const prev = window.molapp.objects[resn];
+          // Don't clobber a same-named user selection (or structure): only rebuild rows we own.
+          if (prev && !prev.ligandSplit) continue;
+          // applyPreset destroyed the old component (and its hidden state) — carry the user's
+          // visibility and color forward so hiding/coloring a ligand survives a repr change.
+          const wasHidden = prev ? Boolean(prev.isHidden) : false;
+          const colorHex = (prev && prev.colorHex) || null;
+
+          const query = lib.Queries.generators.atoms({
+            residueTest: function (ctx) { return SP.residue.label_comp_id(ctx.element) === resn; }
+          });
+          const loci = lib.StructureElement.Loci.fromQuery(data, query);
+          if (lib.StructureElement.Loci.isEmpty(loci)) continue;
+          const bundle = lib.StructureElement.Bundle.fromLoci(loci);
+          await removeSelectionComponent(resn); // idempotent rebuild
+          const comp = await plugin.builders.structure.tryCreateComponent(
+            s.cell,
+            { type: { name: 'bundle', params: bundle }, nullIfEmpty: true, label: resn },
+            resn
+          );
+          if (!comp || !comp.cell) continue;
+          await plugin.builders.structure.representation.addRepresentation(
+            comp.cell,
+            colorHex
+              ? { type: 'ball-and-stick', color: 'uniform', colorParams: { value: hexToMolStarColor(colorHex) } }
+              : { type: 'ball-and-stick' }
+          );
+          if (wasHidden) plugin.managers.structure.component.toggleVisibility([comp]);
+          window.molapp.objects[resn] = {
+            type: 'selection', loci, bundle, colorHex: colorHex,
+            componentRef: comp.ref, isHidden: wasHidden, ligandSplit: true
+          };
+          made.push({ name: resn, representation: 'ballAndStick' });
+        }
+
+        // Hide the lumped het components on EVERY structure so ligands render once (via the
+        // per-ligand components) and a reloaded/second structure's het can't double-render over
+        // them. isHidden is undefined while visible — Boolean()-coerce before testing.
+        for (const st of structures) {
+          const stillVisible = ligandLumpComponents(st).filter(function (c) { return !Boolean(c.cell.state.isHidden); });
+          if (stillVisible.length) plugin.managers.structure.component.toggleVisibility(stillVisible);
+        }
+        return made;
+      }
+
+      function postLigandObjects(objects) {
+        if (objects && objects.length && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
+          window.webkit.messageHandlers.molapp.postMessage({ event: 'objectsAdded', objects: objects });
+        }
+      }
+
+      // Sync native object rows to a visibility change JS made out-of-band (the master Ligand toggle).
+      function postObjectVisibility(items) {
+        if (items && items.length && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
+          window.webkit.messageHandlers.molapp.postMessage({ event: 'objectsVisibility', items: items });
+        }
+      }
+
+      // Split ligands after a load/preset without letting a failure break the caller.
+      async function refreshLigandSplit(postObjects) {
+        try {
+          const made = await ensureLigandSplit();
+          if (postObjects) postLigandObjects(made);
+        } catch (error) {
+          console.error('[MolApp] Ligand split failed:', error);
+        }
       }
 
       function findSelectionComponent(name) {
