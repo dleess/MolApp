@@ -426,7 +426,7 @@ struct MoleculeViewerView: View {
                     localErrorMessage = "Invalid representation. Use: \(MoleculeRepresentation.allCases.map(\.rawValue).joined(separator: ", "))"
                 }
             } else {
-                localErrorMessage = "Usage: repr [ribbon|surface|stick|ballAndStick] [name?]"
+                localErrorMessage = "Usage: repr [ribbon|surface|stick|ballAndStick|sphere] [name?]"
             }
         case "show", "hide":
             if components.count >= 2 {

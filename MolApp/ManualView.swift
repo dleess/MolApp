@@ -33,7 +33,7 @@ struct ManualView: View {
         Section(
             title: "Objects panel",
             icon: "square.stack.3d.up",
-            body: "Every loaded structure and named selection is listed at the bottom-left. The eye toggles a structure's visibility. The colored dot opens a color picker. The Rib / Sur / Stk / B+S buttons switch that object's representation. Calculation and Display actions apply only to the structures currently shown (eye on).",
+            body: "Every loaded structure and named selection is listed at the bottom-left. The eye toggles a structure's visibility. The colored dot opens a color picker. The Rib / Sur / Stk / B+S / Sph buttons switch that object's representation. Calculation and Display actions apply only to the structures currently shown (eye on).",
             commands: [
                 Command(syntax: "show NAME / hide NAME", detail: "Show or hide an object (or water / ligand)"),
                 Command(syntax: "repr surface NAME", detail: "Set an object's representation"),

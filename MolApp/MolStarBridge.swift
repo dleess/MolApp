@@ -54,6 +54,7 @@ enum ObjectRepresentation: String, Codable, CaseIterable, Identifiable {
     case surface
     case stick
     case ballAndStick = "ballAndStick"
+    case sphere
 
     var id: String { rawValue }
 
@@ -63,6 +64,7 @@ enum ObjectRepresentation: String, Codable, CaseIterable, Identifiable {
         case .surface:      "Surface"
         case .stick:        "Stick"
         case .ballAndStick: "Ball+Stick"
+        case .sphere:       "Sphere"
         }
     }
 
@@ -72,6 +74,7 @@ enum ObjectRepresentation: String, Codable, CaseIterable, Identifiable {
         case .surface:      "Sur"
         case .stick:        "Stk"
         case .ballAndStick: "B+S"
+        case .sphere:       "Sph"
         }
     }
 }

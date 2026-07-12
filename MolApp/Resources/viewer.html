@@ -181,6 +181,18 @@
         }
       }
 
+      // Sphere = space-filling (van der Waals) rendering. The atomic-detail preset only creates
+      // ball-and-stick, so swap each component's representation for a spacefill one, reusing the
+      // clear+add builder path that already backs selection representations.
+      async function applySpacefill(target) {
+        if (!target || !target.components) return;
+        const plugin = window.molapp.viewer.plugin;
+        for (const comp of target.components) {
+          await clearComponentRepresentations(comp);
+          await plugin.builders.structure.representation.addRepresentation(comp.cell, { type: 'spacefill' });
+        }
+      }
+
       async function applyRepresentationPreset(representation, structures) {
         const presetByRepresentation = {
           ribbon: 'preset-structure-representation-polymer-cartoon',
@@ -592,7 +604,8 @@
               ribbon:       'preset-structure-representation-polymer-cartoon',
               surface:      'preset-structure-representation-molecular-surface',
               stick:        'preset-structure-representation-atomic-detail',
-              ballAndStick: 'preset-structure-representation-atomic-detail'
+              ballAndStick: 'preset-structure-representation-atomic-detail',
+              sphere:       'preset-structure-representation-atomic-detail'
             };
             const preset = presetMap[representation];
             if (!preset) throw new Error('Unknown representation: ' + representation);
@@ -603,6 +616,8 @@
             obj.structureRef = refreshed;
             if (representation === 'stick' || representation === 'ballAndStick') {
               await applyBallAndStickVisuals(refreshed, representation === 'stick');
+            } else if (representation === 'sphere') {
+              await applySpacefill(refreshed);
             }
           } else if (obj.type === 'selection' && obj.loci) {
             const structures = plugin.managers.structure.hierarchy.current.structures;
@@ -611,7 +626,8 @@
               ribbon:       'cartoon',
               surface:      'molecular-surface',
               stick:        'ball-and-stick',
-              ballAndStick: 'ball-and-stick'
+              ballAndStick: 'ball-and-stick',
+              sphere:       'spacefill'
             };
             const reprType = reprTypeMap[representation] || 'cartoon';
             const typeParams = representation === 'stick'
