@@ -164,32 +164,29 @@
       const BALL_AND_STICK_VISUALS = ['element-sphere', 'intra-bond', 'inter-bond'];
       const STICK_ONLY_VISUALS = ['intra-bond', 'inter-bond'];
 
-      // The atomic-detail preset (and the ball-and-stick reprType) always draw spheres. Patch the
-      // ball-and-stick representations on a structure so Stk hides them and B+S keeps them.
-      async function applyBallAndStickVisuals(target, sticksOnly) {
+      // Force each component's atomic representation deterministically. The atomic-detail preset
+      // auto-picks the repr type from structure heuristics — e.g. it renders spacefill (not
+      // ball-and-stick) for NMR ensembles / low atoms-per-residue models like 1D3Z — so patching
+      // "existing ball-and-stick visuals" silently no-ops and Stk/B+S come out as spheres. Rebuild
+      // the repr explicitly (same clear+add path the selection code uses) so the type is exact:
+      //   stick        → ball-and-stick, bonds only (no element spheres)
+      //   ballAndStick → ball-and-stick, spheres + bonds
+      //   sphere       → spacefill (van der Waals)
+      async function applyAtomicRepresentation(target, representation) {
         if (!target || !target.components) return;
         const plugin = window.molapp.viewer.plugin;
-        const visuals = sticksOnly ? STICK_ONLY_VISUALS : BALL_AND_STICK_VISUALS;
-        for (const comp of target.components) {
-          for (const repr of (comp.representations || [])) {
-            if (repr?.cell?.transform?.params?.type?.name !== 'ball-and-stick') continue;
-            await plugin.managers.structure.component.updateRepresentations(
-              [comp], repr,
-              (old) => { if (old.type && old.type.params) old.type.params.visuals = visuals.slice(); }
-            );
-          }
-        }
-      }
-
-      // Sphere = space-filling (van der Waals) rendering. The atomic-detail preset only creates
-      // ball-and-stick, so swap each component's representation for a spacefill one, reusing the
-      // clear+add builder path that already backs selection representations.
-      async function applySpacefill(target) {
-        if (!target || !target.components) return;
-        const plugin = window.molapp.viewer.plugin;
+        const reprType = representation === 'sphere' ? 'spacefill' : 'ball-and-stick';
+        const typeParams = representation === 'stick'
+          ? { visuals: STICK_ONLY_VISUALS.slice() }
+          : representation === 'ballAndStick'
+            ? { visuals: BALL_AND_STICK_VISUALS.slice() }
+            : null;
         for (const comp of target.components) {
           await clearComponentRepresentations(comp);
-          await plugin.builders.structure.representation.addRepresentation(comp.cell, { type: 'spacefill' });
+          await plugin.builders.structure.representation.addRepresentation(
+            comp.cell,
+            { type: reprType, ...(typeParams ? { typeParams } : {}) }
+          );
         }
       }
 
@@ -216,7 +213,7 @@
           const refIds = new Set(targets.map(t => t.cell.transform.ref));
           const current = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
           for (const s of current) {
-            if (refIds.has(s.cell.transform.ref)) await applyBallAndStickVisuals(s, true);
+            if (refIds.has(s.cell.transform.ref)) await applyAtomicRepresentation(s, 'stick');
           }
         }
         window.molapp.representation = representation;
@@ -454,9 +451,10 @@
             });
 
             if (components.length > 0) {
-              // If we want to force a state rather than just toggle, we can check current state
-              // components[0].cell.state.isHidden
-              const currentHidden = components[0].cell.state.isHidden;
+              // isHidden is `undefined` (not `false`) while visible, so coerce both sides to Bool
+              // before comparing — a strict `undefined === false` would skip the toggle and leave
+              // water/ligand shown. Toggle only when current state differs from the request.
+              const currentHidden = Boolean(components[0].cell.state.isHidden);
               if (currentHidden === isVisible) {
                 plugin.managers.structure.component.toggleVisibility(components);
               }
@@ -614,10 +612,8 @@
             await plugin.managers.structure.component.applyPreset([target], preset);
             const refreshed = findStructureObject(name) || target;
             obj.structureRef = refreshed;
-            if (representation === 'stick' || representation === 'ballAndStick') {
-              await applyBallAndStickVisuals(refreshed, representation === 'stick');
-            } else if (representation === 'sphere') {
-              await applySpacefill(refreshed);
+            if (representation === 'stick' || representation === 'ballAndStick' || representation === 'sphere') {
+              await applyAtomicRepresentation(refreshed, representation);
             }
           } else if (obj.type === 'selection' && obj.loci) {
             const structures = plugin.managers.structure.hierarchy.current.structures;
@@ -1089,17 +1085,23 @@
         const ST = resolveStateTransforms();
         window.molapp.superposeRefs = window.molapp.superposeRefs || {};
         const cellRef = cell.transform.ref;
+        const params = { transform: { name: 'matrix', params: { data: mat4, transpose: false } } };
 
-        // Remove any transform from a previous superpose so re-runs don't compose/drift.
+        // The transform node is a decorator: inserting it reparents the structure's components
+        // under it. Deleting a prior node would take those reparented components with it, so the
+        // structure vanishes (or reruns duplicate) — instead, update the existing node's matrix in
+        // place. buildResidueList reads the untransformed .data, so the matrix is always absolute
+        // (reference frame), making re-runs idempotent rather than compounding.
         const prior = window.molapp.superposeRefs[cellRef];
-        if (prior) {
-          try { await plugin.state.data.build().delete(prior).commit(); } catch (e) {}
+        if (prior && plugin.state.data.cells.has(prior)) {
+          await plugin.state.data.build().to(prior).update(
+            ST.Model.TransformStructureConformation,
+            (old) => { old.transform = params.transform; }
+          ).commit();
+          return;
         }
 
-        const builder = plugin.state.data.build().to(cell).insert(
-          ST.Model.TransformStructureConformation,
-          { transform: { name: 'matrix', params: { data: mat4, transpose: false } } }
-        );
+        const builder = plugin.state.data.build().to(cell).insert(ST.Model.TransformStructureConformation, params);
         const newRef = builder.ref;
         await plugin.runTask(plugin.state.data.updateTree(builder));
         window.molapp.superposeRefs[cellRef] = newRef;
