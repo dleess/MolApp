@@ -969,6 +969,11 @@
           clearSelectionVisuals();
         },
 
+        loadState: async function (payload) {
+          if (!payload || !payload.json) throw new Error('loadState requires json.');
+          await deserializeMolAppState(payload.json);
+        },
+
         undo: async function () {
           if (!window.molapp.undoStack.length) return;
           window.molapp.redoStack.push(snapshotMolApp());
@@ -1572,7 +1577,8 @@
       const UNDOABLE_COMMANDS = new Set([
         'loadLocalStructure', 'loadPdbId', 'setRepresentation', 'toggleVisibility', 'setSelection',
         'clearSelection', 'setObjectVisibility', 'setObjectRepresentation', 'setObjectColor',
-        'surfacePotential', 'superpose', 'secondaryStructure', 'clearMeasurements', 'resetAll'
+        'surfacePotential', 'superpose', 'secondaryStructure', 'clearMeasurements', 'resetAll',
+        'loadState'
       ]);
 
       function snapshotMolApp() {
@@ -1629,6 +1635,84 @@
         } catch (error) {
           console.error('[MolApp] Undo snapshot failed:', error);
         }
+      }
+
+      // --- Save / read .molapp state -----------------------------------------------------------
+      // The whole scene as a JSON string. plugin.state.getSnapshot() is what Mol* itself JSON-
+      // stringifies for its .molj format, so it round-trips; app metadata drives the Objects panel.
+      // (PDB-ID structures re-fetch from the URL on load; locally-opened files carry inline data.)
+      async function serializeMolAppState() {
+        // Let any in-flight command settle first so a Save mid-load doesn't capture a torn state tree.
+        await nativeCommandQueue;
+        const plugin = window.molapp.viewer.plugin;
+        return JSON.stringify({
+          version: 1,
+          molstar: plugin.state.getSnapshot(),
+          objects: objectsMeta(),
+          ligandResns: (window.molapp.ligandResns || []).slice(),
+          visibility: Object.assign({}, window.molapp.visibility)
+        });
+      }
+
+      async function deserializeMolAppState(json) {
+        const parsed = JSON.parse(json);
+        if (!parsed || !parsed.molstar) throw new Error('Not a valid .molapp file.');
+        if (parsed.version !== 1) throw new Error('Unsupported .molapp version.');
+        const plugin = window.molapp.viewer.plugin;
+        const lib = window.molstar.lib.structure;
+        await plugin.state.setSnapshot(parsed.molstar);
+        // Mol* restores with revertOnError:false, so a PDB structure that fails to re-fetch (offline)
+        // leaves setSnapshot resolved with that cell simply absent. Re-derive objects from the LIVE
+        // restored state: keep only those whose cell actually came back (no phantom rows), rebuilding
+        // each selection's bundle from its component so ligand rows stay editable. Collect the misses.
+        // Map restored structures to their saved metas BY ORDER — not by label. A restored structure's
+        // cell label isn't guaranteed to equal the saved name (findStructureObject only matched
+        // originally via the stored structureRef, which a fresh load doesn't have), so a label match
+        // would false-fail a structure that actually loaded. Snapshot preserves load order, so index
+        // i in the saved structure list ↔ index i in the restored hierarchy.
+        const objects = {};
+        const failed = [];
+        const restored = plugin.managers.structure.hierarchy.current.structures;
+        let structureIdx = 0;
+        for (const meta of (parsed.objects || [])) {
+          if (meta.type === 'selection') {
+            const comp = findSelectionComponent(meta.name);
+            if (!comp || !comp.cell.obj || !comp.cell.obj.data) continue;
+            const o = { type: 'selection', colorHex: meta.colorHex || null, representation: meta.representation, isHidden: !meta.isVisible, componentRef: comp.cell.transform.ref };
+            try {
+              const loci = lib.Structure.toStructureElementLoci(comp.cell.obj.data);
+              o.loci = loci;
+              o.bundle = lib.StructureElement.Bundle.fromLoci(loci);
+            } catch (e) { /* bundle stays undefined; row still shows, repr edits no-op */ }
+            objects[meta.name] = o;
+          } else {
+            const t = restored[structureIdx++];
+            if (!t) { failed.push(meta.name); continue; }
+            objects[meta.name] = { type: 'structure', colorHex: meta.colorHex || null, representation: meta.representation, isHidden: !meta.isVisible, structureRef: t };
+          }
+        }
+        window.molapp.objects = objects;
+        window.molapp.ligandResns = (parsed.ligandResns || []).slice();
+        window.molapp.visibility = Object.assign({}, parsed.visibility || {});
+        window.molapp.selection = null;
+        window.molapp.selectionLoci = null;
+        clearSelectionVisuals();
+        // Panel first (from what actually loaded), then surface any misses so the error banner shows.
+        // The partial scene stays visible; Edit>Undo restores the pre-load state if the user wants.
+        postObjectsReplaced(objectsMeta(), window.molapp.visibility);
+        if (failed.length) throw new Error('Could not load: ' + failed.join(', ') + ' (offline or unavailable).');
+      }
+
+      // PNG data URI of the current viewport. getImageDataUri() draws a fresh frame then reads it,
+      // so it works regardless of the WebGL preserveDrawingBuffer setting.
+      async function captureImageDataURL() {
+        // Wait out any in-flight command so an export mid-load renders the finished scene, not a
+        // half-built one.
+        await nativeCommandQueue;
+        const plugin = window.molapp.viewer.plugin;
+        const vs = plugin.helpers && plugin.helpers.viewportScreenshot;
+        if (!vs) throw new Error('Screenshot helper is unavailable.');
+        return await vs.getImageDataUri();
       }
 
       // Split ligands after a load/preset without letting a failure break the caller.
@@ -1848,6 +1932,8 @@
         window.molapp = {
           viewer,
           handleNativeCommand,
+          serializeMolAppState,
+          captureImageDataURL,
           handlePencilHover,
           handlePencilHoverEnd,
           handleNativePinch,

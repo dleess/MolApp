@@ -41,6 +41,8 @@ struct MoleculeViewerView: View {
     @State private var isMorphing = false
     @State private var isManualPresented = false
     @State private var measureKind: MeasureKind? = nil
+    @State private var isStateImporterPresented = false
+    @State private var shareItem: ShareItem?
 
     var body: some View {
         ZStack {
@@ -110,6 +112,15 @@ struct MoleculeViewerView: View {
             allowsMultipleSelection: false,
             onCompletion: handleFileImport
         )
+        .fileImporter(
+            isPresented: $isStateImporterPresented,
+            allowedContentTypes: [.molApp],
+            allowsMultipleSelection: false,
+            onCompletion: handleStateImport
+        )
+        .sheet(item: $shareItem) { item in
+            ShareSheet(url: item.url)
+        }
         .sheet(isPresented: $isManualPresented) {
             ManualView()
         }
@@ -152,6 +163,8 @@ struct MoleculeViewerView: View {
                 statusMessage = "Superposed visible structures"
             case .secondaryStructure:
                 statusMessage = "Secondary structure (helix/sheet/coil)"
+            case .loadState:
+                statusMessage = "State loaded"
             default:
                 break
             }
@@ -226,6 +239,44 @@ struct MoleculeViewerView: View {
                     Label("Load PDB ID", systemImage: "square.and.arrow.down")
                 }
                 .disabled(pdbIdText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Divider()
+
+                Button {
+                    saveState()
+                } label: {
+                    Label("Save State (.molapp)", systemImage: "square.and.arrow.down.on.square")
+                }
+                .disabled(bridge.objects.isEmpty)
+
+                Button {
+                    localErrorMessage = nil
+                    isStateImporterPresented = true
+                } label: {
+                    Label("Open State (.molapp)", systemImage: "folder.badge.gearshape")
+                }
+
+                Divider()
+
+                Menu {
+                    ForEach(ExportFormat.allCases) { format in
+                        Button {
+                            exportImage(format)
+                        } label: {
+                            Text(format.title)
+                        }
+                    }
+                } label: {
+                    Label("Export Display", systemImage: "photo")
+                }
+                .disabled(bridge.objects.isEmpty)
+
+                Button {
+                    printDisplay()
+                } label: {
+                    Label("Print", systemImage: "printer")
+                }
+                .disabled(bridge.objects.isEmpty)
 
                 Divider()
 
@@ -560,6 +611,70 @@ struct MoleculeViewerView: View {
             bridge.loadLocalStructure(data: structure.data, format: structure.format, label: structure.label)
         } catch {
             localErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func handleStateImport(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url)
+            guard let json = String(data: data, encoding: .utf8) else {
+                localErrorMessage = "Could not read .molapp file."
+                return
+            }
+            localErrorMessage = nil
+            statusMessage = "Loading state…"
+            bridge.loadState(json: json)
+        } catch {
+            localErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveState() {
+        localErrorMessage = nil
+        Task {
+            guard let json = await bridge.serializeState() else {
+                localErrorMessage = "Could not capture current state."
+                return
+            }
+            guard let url = writeTemporaryFile(named: "molecule.molapp", data: Data(json.utf8)) else {
+                localErrorMessage = "Could not write state file."
+                return
+            }
+            shareItem = ShareItem(url: url)
+        }
+    }
+
+    private func exportImage(_ format: ExportFormat) {
+        localErrorMessage = nil
+        statusMessage = "Rendering \(format.title)…"
+        Task {
+            guard let dataURL = await bridge.captureImageDataURL(),
+                  let image = imageFromDataURL(dataURL) else {
+                localErrorMessage = "Could not capture the display."
+                return
+            }
+            guard let data = encodeImage(image, as: format),
+                  let url = writeTemporaryFile(named: "molecule.\(format.fileExtension)", data: data) else {
+                localErrorMessage = "Could not encode \(format.title)."
+                return
+            }
+            statusMessage = "Exported \(format.title)"
+            shareItem = ShareItem(url: url)
+        }
+    }
+
+    private func printDisplay() {
+        localErrorMessage = nil
+        Task {
+            guard let dataURL = await bridge.captureImageDataURL(),
+                  let image = imageFromDataURL(dataURL) else {
+                localErrorMessage = "Could not capture the display."
+                return
+            }
+            presentPrint(image)
         }
     }
 

@@ -23,6 +23,7 @@ enum MolStarCommandName: String, Codable {
     case resetAll
     case undo
     case redo
+    case loadState
 }
 
 struct MolStarCommandResult: Decodable {
@@ -261,6 +262,40 @@ final class MolStarBridge: NSObject, ObservableObject {
         send(.redo, payload: EmptyPayload())
     }
 
+    func loadState(json: String) {
+        send(.loadState, payload: StatePayload(json: json))
+    }
+
+    // Request/response (not fire-and-forget): the caller needs the returned value, so bypass the
+    // serial script queue and await the JS result directly.
+    @MainActor
+    func serializeState() async -> String? {
+        guard let webView else { return nil }
+        do {
+            let result = try await webView.callAsyncJavaScript(
+                "return (window.molapp && window.molapp.serializeMolAppState) ? await window.molapp.serializeMolAppState() : null;",
+                arguments: [:], in: nil, contentWorld: .page)
+            return result as? String
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    @MainActor
+    func captureImageDataURL() async -> String? {
+        guard let webView else { return nil }
+        do {
+            let result = try await webView.callAsyncJavaScript(
+                "return await window.molapp.captureImageDataURL();",
+                arguments: [:], in: nil, contentWorld: .page)
+            return result as? String
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     private func updateObject(name: String, update: (inout MolAppObject) -> Void) {
         if let idx = objects.firstIndex(where: { $0.name == name }) {
             update(&objects[idx])
@@ -410,6 +445,10 @@ private struct CommandEnvelope<Payload: Encodable>: Encodable {
 }
 
 private struct EmptyPayload: Encodable {}
+
+private struct StatePayload: Encodable {
+    let json: String
+}
 
 private struct LocalStructurePayload: Encodable {
     let data: String
