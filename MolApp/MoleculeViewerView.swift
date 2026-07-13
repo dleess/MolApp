@@ -28,6 +28,7 @@ struct MoleculeViewerView: View {
     @State private var pdbIdText = ""
     @State private var selectedRepresentation: MoleculeRepresentation = .ribbon
     @State private var visibilityStates: [MoleculeVisibilityFeature: Bool] = [
+        .protein: true,
         .water: true,
         .ligand: true
     ]
@@ -128,7 +129,7 @@ struct MoleculeViewerView: View {
                 statusMessage = "Loaded \(label)"
                 bridge.addObject(MolAppObject(name: label, type: .structure))
                 pendingStructureLabel = nil
-                visibilityStates = [.water: true, .ligand: true]
+                visibilityStates = [.protein: true, .water: true, .ligand: true]
             case .loadPdbId:
                 // Use the label captured at send time, not the live field — the field may have
                 // changed during the async fetch, which would name the object off the JS key.
@@ -136,7 +137,7 @@ struct MoleculeViewerView: View {
                 statusMessage = "Loaded \(name)"
                 bridge.addObject(MolAppObject(name: name, type: .structure))
                 pendingStructureLabel = nil
-                visibilityStates = [.water: true, .ligand: true]
+                visibilityStates = [.protein: true, .water: true, .ligand: true]
             case .setRepresentation:
                 statusMessage = "\(selectedRepresentation.title) representation"
             case .surfacePotential:
@@ -153,6 +154,13 @@ struct MoleculeViewerView: View {
                 statusMessage = "Secondary structure (helix/sheet/coil)"
             default:
                 break
+            }
+        }
+        .onReceive(bridge.$featureVisibility) { dict in
+            for (key, isVisible) in dict {
+                if let feature = MoleculeVisibilityFeature(rawValue: key) {
+                    visibilityStates[feature] = isVisible
+                }
             }
         }
     }
@@ -218,9 +226,36 @@ struct MoleculeViewerView: View {
                     Label("Load PDB ID", systemImage: "square.and.arrow.down")
                 }
                 .disabled(pdbIdText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Divider()
+
+                Button(role: .destructive) {
+                    localErrorMessage = nil
+                    bridge.resetAll()
+                    visibilityStates = [.protein: true, .water: true, .ligand: true]
+                    statusMessage = "Reset — everything cleared"
+                } label: {
+                    Label("Reset All", systemImage: "arrow.counterclockwise")
+                }
             }
 
             Menu("Edit") {
+                Button {
+                    localErrorMessage = nil
+                    bridge.undo()
+                } label: {
+                    Label("Undo", systemImage: "arrow.uturn.backward")
+                }
+
+                Button {
+                    localErrorMessage = nil
+                    bridge.redo()
+                } label: {
+                    Label("Redo", systemImage: "arrow.uturn.forward")
+                }
+
+                Divider()
+
                 Button {
                     localErrorMessage = nil
                     bridge.clearSelection()

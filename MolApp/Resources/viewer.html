@@ -190,6 +190,30 @@
         }
       }
 
+      // The stock molecular-surface preset builds one surface over the merged `all` component, so
+      // every isolated crystallographic water becomes its own tiny sphere — a red-dot cloud on the
+      // surface. Instead build the surface on the polymer component only (via the cartoon preset's
+      // clean component split, then swap the polymer repr). Water/ligand stay separate & controllable.
+      async function applySurfaceRepresentation(structures) {
+        const plugin = window.molapp.viewer.plugin;
+        await plugin.managers.structure.component.applyPreset(structures, 'preset-structure-representation-polymer-cartoon');
+        const refIds = new Set(structures.map(s => s.cell.transform.ref));
+        const current = plugin.managers.structure.hierarchy.current.structures;
+        for (const s of current) {
+          if (!refIds.has(s.cell.transform.ref)) continue;
+          const polymer = (s.components || []).filter(function (c) {
+            const tags = c.cell.transform.tags;
+            return Array.isArray(tags) && tags.indexOf('structure-component-static-polymer') !== -1;
+          });
+          for (const comp of polymer) {
+            await clearComponentRepresentations(comp);
+            await plugin.builders.structure.representation.addRepresentation(
+              comp.cell, { type: 'molecular-surface', color: 'chain-id' });
+          }
+        }
+        await hideWaterForSurface();
+      }
+
       async function applyRepresentationPreset(representation, structures) {
         const presetByRepresentation = {
           ribbon: 'preset-structure-representation-polymer-cartoon',
@@ -208,7 +232,11 @@
           throw new Error('Load a structure before changing representation.');
         }
 
-        await window.molapp.viewer.plugin.managers.structure.component.applyPreset(targets, preset);
+        if (representation === 'surface') {
+          await applySurfaceRepresentation(targets);
+        } else {
+          await window.molapp.viewer.plugin.managers.structure.component.applyPreset(targets, preset);
+        }
         if (representation === 'stick') {
           const refIds = new Set(targets.map(t => t.cell.transform.ref));
           const current = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
@@ -387,6 +415,9 @@
             throw new Error('Unknown MolApp command: ' + command);
           }
 
+          // Snapshot the pre-mutation scene so Edit>Undo can return to it.
+          if (UNDOABLE_COMMANDS.has(command)) pushUndoSnapshot();
+
           await handler(payload);
           postCommandResult({ id, command, success: true });
         } catch (error) {
@@ -471,12 +502,20 @@
             return;
           }
 
+          // 'protein' isn't a static key: it lives in the `polymer` component (cartoon/surface).
+          // Deliberately NOT matching the atomic-detail `all` component — that merges polymer+water
+          // +ligand into one, so hiding it would blank the whole scene and leave the Water/Ligand
+          // toggles dead. In atomic (stick/B+S/sphere) modes there's no polymer component, so the
+          // Protein toggle simply no-ops there (water/ligand can't be split out of `all` anyway).
+          const wantTags = feature === 'protein'
+            ? ['structure-component-static-polymer']
+            : ['structure-component-static-' + feature];
           for (const s of structures) {
             const components = s.components.filter(c => {
               // Mol* tags the static water/ligand components on the transform as
               // `structure-component-static-<feature>` (cell.obj carries no tags).
               const tags = c.cell.transform.tags;
-              return Array.isArray(tags) && tags.indexOf('structure-component-static-' + feature) !== -1;
+              return Array.isArray(tags) && wantTags.some(t => tags.indexOf(t) !== -1);
             });
 
             if (components.length > 0) {
@@ -608,6 +647,16 @@
             if (Boolean(isCurrentlyHidden) === Boolean(isVisible)) {
               plugin.managers.structure.hierarchy.toggleVisibility([target]);
             }
+            // Split-ligand components are children of this structure, so hiding it hides them too —
+            // mirror that onto their native rows (which are separate controls) so eyes don't lie.
+            // ponytail: ligandResns is global, so this syncs every ligand row; fine for the common
+            // single-structure case, upgrade to per-structure resns if multi-structure ligands matter.
+            const synced = [];
+            for (const resn of (window.molapp.ligandResns || [])) {
+              const o = window.molapp.objects[resn];
+              if (o) { o.isHidden = !isVisible; synced.push({ name: resn, isVisible: isVisible }); }
+            }
+            if (synced.length) postObjectVisibility(synced);
           } else if (obj.type === 'selection') {
             const comp = findSelectionComponent(name);
             if (comp) {
@@ -640,9 +689,14 @@
             if (!preset) throw new Error('Unknown representation: ' + representation);
             const target = findStructureObject(name);
             if (!target) return;
-            await plugin.managers.structure.component.applyPreset([target], preset);
+            if (representation === 'surface') {
+              await applySurfaceRepresentation([target]);
+            } else {
+              await plugin.managers.structure.component.applyPreset([target], preset);
+            }
             const refreshed = findStructureObject(name) || target;
             obj.structureRef = refreshed;
+            obj.representation = representation;
             if (representation === 'stick' || representation === 'ballAndStick' || representation === 'sphere') {
               await applyAtomicRepresentation(refreshed, representation);
             }
@@ -690,6 +744,7 @@
                   }
                 );
                 obj.componentRef = comp.ref || comp.cell.transform.ref;
+                obj.representation = representation;
               } else {
                 obj.componentRef = null;
               }
@@ -899,6 +954,31 @@
         },
         clearMeasurements: async function () {
           await clearMeasurementsInternal();
+        },
+
+        resetAll: async function () {
+          const plugin = window.molapp.viewer.plugin;
+          await plugin.clear(true); // true → also reset camera/viewport
+          window.molapp.objects = {};
+          window.molapp.ligandResns = [];
+          window.molapp.visibility = {};
+          window.molapp.selection = null;
+          window.molapp.selectionLoci = null;
+          window.molapp.surfacePotentialRefs = [];
+          window.molapp.representation = null;
+          clearSelectionVisuals();
+        },
+
+        undo: async function () {
+          if (!window.molapp.undoStack.length) return;
+          window.molapp.redoStack.push(snapshotMolApp());
+          await restoreMolApp(window.molapp.undoStack.pop());
+        },
+
+        redo: async function () {
+          if (!window.molapp.redoStack.length) return;
+          window.molapp.undoStack.push(snapshotMolApp());
+          await restoreMolApp(window.molapp.redoStack.pop());
         }
       };
 
@@ -1454,6 +1534,103 @@
         }
       }
 
+      // Sync a native Display>Visibility toggle (water/ligand/protein) that JS changed on its own.
+      function postFeatureVisibility(feature, isVisible) {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
+          window.webkit.messageHandlers.molapp.postMessage({ event: 'featureVisibility', feature: feature, isVisible: isVisible });
+        }
+      }
+
+      // Replace the whole native Objects panel after undo/redo/reset rebuilt the JS state.
+      function postObjectsReplaced(objects, visibility) {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
+          window.webkit.messageHandlers.molapp.postMessage({ event: 'objectsReplaced', objects: objects, visibility: visibility });
+        }
+      }
+
+      // Molecular surface is computed per atom, so each isolated crystallographic water becomes a
+      // lone sphere — a red-dot cloud over the surface. Every viewer hides water under a surface;
+      // do the same and sync the native Water toggle so it reads "Show Water".
+      async function hideWaterForSurface() {
+        const plugin = window.molapp.viewer.plugin;
+        const structures = plugin.managers.structure.hierarchy.current.structures;
+        for (const s of structures) {
+          const water = (s.components || []).filter(function (c) {
+            const tags = c.cell.transform.tags;
+            return Array.isArray(tags) && tags.indexOf('structure-component-static-water') !== -1;
+          });
+          const visible = water.filter(function (c) { return !Boolean(c.cell.state.isHidden); });
+          if (visible.length) plugin.managers.structure.component.toggleVisibility(visible);
+        }
+        window.molapp.visibility.water = false;
+        postFeatureVisibility('water', false);
+      }
+
+      // --- Undo / redo (Mol* whole-scene snapshots) -------------------------------------------
+      // ponytail: snapshots the full plugin state before every mutating command. Fine for an iPad
+      // viewer's handful of structures; if snapshot size ever hurts, cap by state size not count.
+      const UNDOABLE_COMMANDS = new Set([
+        'loadLocalStructure', 'loadPdbId', 'setRepresentation', 'toggleVisibility', 'setSelection',
+        'clearSelection', 'setObjectVisibility', 'setObjectRepresentation', 'setObjectColor',
+        'surfacePotential', 'superpose', 'secondaryStructure', 'clearMeasurements', 'resetAll'
+      ]);
+
+      function snapshotMolApp() {
+        const plugin = window.molapp.viewer.plugin;
+        const objects = {};
+        for (const k in window.molapp.objects) objects[k] = Object.assign({}, window.molapp.objects[k]);
+        return {
+          molstar: plugin.state.getSnapshot(),
+          objects: objects,
+          ligandResns: (window.molapp.ligandResns || []).slice(),
+          visibility: Object.assign({}, window.molapp.visibility)
+        };
+      }
+
+      // Panel rows derived from the live restored state, so eye state matches what Mol* actually shows.
+      function objectsMeta() {
+        const items = [];
+        for (const name in window.molapp.objects) {
+          const o = window.molapp.objects[name];
+          let isVisible = true;
+          if (o.type === 'structure') {
+            const t = findStructureObject(name);
+            isVisible = t ? !Boolean(t.cell.state.isHidden) : true;
+          } else {
+            const c = findSelectionComponent(name);
+            isVisible = c ? !Boolean(c.cell.state.isHidden) : !Boolean(o.isHidden);
+          }
+          // ponytail: repr indicator best-effort; scene is authoritative, row highlight may reset.
+          const representation = o.representation || (o.type === 'structure' ? 'ribbon' : 'ballAndStick');
+          items.push({ name: name, type: o.type, isVisible: isVisible, representation: representation, colorHex: o.colorHex || null });
+        }
+        return items;
+      }
+
+      async function restoreMolApp(snap) {
+        const plugin = window.molapp.viewer.plugin;
+        await plugin.state.setSnapshot(snap.molstar);
+        window.molapp.objects = snap.objects;
+        window.molapp.ligandResns = snap.ligandResns.slice();
+        window.molapp.visibility = Object.assign({}, snap.visibility);
+        // setSnapshot rebuilt the structures, so any tracked selection now points at detached loci —
+        // drop it (and clear the highlight/dim overlay) so a later double-tap doesn't focus stale loci.
+        window.molapp.selection = null;
+        window.molapp.selectionLoci = null;
+        clearSelectionVisuals();
+        postObjectsReplaced(objectsMeta(), window.molapp.visibility);
+      }
+
+      function pushUndoSnapshot() {
+        try {
+          window.molapp.undoStack.push(snapshotMolApp());
+          if (window.molapp.undoStack.length > 25) window.molapp.undoStack.shift();
+          window.molapp.redoStack = [];
+        } catch (error) {
+          console.error('[MolApp] Undo snapshot failed:', error);
+        }
+      }
+
       // Split ligands after a load/preset without letting a failure break the caller.
       async function refreshLigandSplit(postObjects) {
         try {
@@ -1683,6 +1860,9 @@
           measurePending: [],
           prevGranularity: null,
           objects: {},
+          ligandResns: [],
+          undoStack: [],
+          redoStack: [],
           selectionVisualState: {
             selected: false,
             contextDimmed: false

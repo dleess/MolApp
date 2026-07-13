@@ -33,6 +33,7 @@ enum MoleculeRepresentation: String, CaseIterable, Identifiable {
 }
 
 enum MoleculeVisibilityFeature: String, CaseIterable, Identifiable {
+    case protein
     case water
     case ligand
 
@@ -42,6 +43,8 @@ enum MoleculeVisibilityFeature: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .protein:
+            "Protein"
         case .water:
             "Water"
         case .ligand:
@@ -51,6 +54,8 @@ enum MoleculeVisibilityFeature: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .protein:
+            "p.circle"
         case .water:
             "drop"
         case .ligand:

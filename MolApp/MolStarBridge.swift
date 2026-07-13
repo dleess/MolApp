@@ -20,6 +20,9 @@ enum MolStarCommandName: String, Codable {
     case secondaryStructure
     case setMeasureMode
     case clearMeasurements
+    case resetAll
+    case undo
+    case redo
 }
 
 struct MolStarCommandResult: Decodable {
@@ -146,6 +149,9 @@ final class MolStarBridge: NSObject, ObservableObject {
     @Published private(set) var hoverPoint: CGPoint?
     // Last completed distance measurement, as "atomA — atomB" (Å value shown on canvas by Mol*).
     @Published private(set) var lastMeasurement: String?
+    // Feature (water/ligand/protein) visibility JS changed on its own (e.g. Surface auto-hides
+    // water); the View observes this to keep its Display>Visibility toggles in sync.
+    @Published private(set) var featureVisibility: [String: Bool] = [:]
 
     private weak var webView: WKWebView?
     private let encoder = JSONEncoder()
@@ -241,6 +247,20 @@ final class MolStarBridge: NSObject, ObservableObject {
         send(.clearMeasurements, payload: EmptyPayload())
     }
 
+    func resetAll() {
+        send(.resetAll, payload: EmptyPayload())
+        objects = []
+        featureVisibility = [:]
+    }
+
+    func undo() {
+        send(.undo, payload: EmptyPayload())
+    }
+
+    func redo() {
+        send(.redo, payload: EmptyPayload())
+    }
+
     private func updateObject(name: String, update: (inout MolAppObject) -> Void) {
         if let idx = objects.firstIndex(where: { $0.name == name }) {
             update(&objects[idx])
@@ -332,6 +352,33 @@ final class MolStarBridge: NSObject, ObservableObject {
                 guard let name = item["name"] as? String, let isVisible = item["isVisible"] as? Bool else { continue }
                 updateObject(name: name) { $0.isVisible = isVisible }
             }
+            return
+        }
+
+        // JS auto-changed a feature toggle (e.g. Surface hides water); mirror it so the menu label
+        // ("Show/Hide Water") stays truthful. The View observes featureVisibility to update its state.
+        if let dict = messageBody as? [String: Any], dict["event"] as? String == "featureVisibility",
+           let feature = dict["feature"] as? String, let isVisible = dict["isVisible"] as? Bool {
+            featureVisibility = [feature: isVisible]
+            return
+        }
+
+        // Undo/redo/reset rebuilt the JS scene; replace the whole panel from the restored state.
+        if let dict = messageBody as? [String: Any], dict["event"] as? String == "objectsReplaced",
+           let arr = dict["objects"] as? [[String: Any]] {
+            var rebuilt: [MolAppObject] = []
+            for object in arr {
+                guard let name = object["name"] as? String,
+                      let typeRaw = object["type"] as? String,
+                      let type = MolAppObject.ObjectType(rawValue: typeRaw) else { continue }
+                let isVisible = object["isVisible"] as? Bool ?? true
+                let representation = (object["representation"] as? String)
+                    .flatMap(ObjectRepresentation.init(rawValue:)) ?? (type == .structure ? .ribbon : .ballAndStick)
+                let colorHex = object["colorHex"] as? String
+                rebuilt.append(MolAppObject(name: name, type: type, isVisible: isVisible, representation: representation, colorHex: colorHex))
+            }
+            objects = rebuilt
+            if let vis = dict["visibility"] as? [String: Bool] { featureVisibility = vis }
             return
         }
 
