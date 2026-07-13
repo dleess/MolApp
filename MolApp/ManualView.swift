@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum AppInfo {
-    static let version = "0.1"
+    static let version = "1.0"
 }
 
 struct ManualView: View {
@@ -31,11 +31,23 @@ struct ManualView: View {
             ]
         ),
         Section(
+            title: "Saving & exporting",
+            icon: "square.and.arrow.up",
+            body: "File ▸ Save State writes the whole session — every structure, selection, color, representation and visibility — to a .molapp file; File ▸ Open State restores it. Structures loaded from the RCSB are re-fetched on open, so restoring those needs a network connection. File ▸ Export Display saves a snapshot of the current view as PNG, JPEG, GIF, SVG or PDF, and File ▸ Print sends it to a printer. File ▸ Reset All clears everything back to an empty viewer.",
+            commands: []
+        ),
+        Section(
+            title: "Undo & redo",
+            icon: "arrow.uturn.backward",
+            body: "Edit ▸ Undo and Edit ▸ Redo step backward and forward through changes — loading, hiding, recoloring, representation switches and state loads are all reversible (up to 25 steps). Edit ▸ Clear Selection drops the active selection without removing its named object.",
+            commands: []
+        ),
+        Section(
             title: "Objects panel",
             icon: "square.stack.3d.up",
-            body: "Every loaded structure and named selection is listed at the bottom-left. The eye toggles a structure's visibility. The colored dot opens a color picker. The Rib / Sur / Stk / B+S / Sph buttons switch that object's representation. Calculation and Display actions apply only to the structures currently shown (eye on).",
+            body: "Every loaded structure and named selection is listed at the bottom-left. The eye toggles a structure's visibility. The colored dot opens a color picker. The Rib / Sur / Stk / B+S / Sph buttons switch that object's representation. Display ▸ Visibility toggles protein, water and ligand across the whole scene. Calculation and Display actions apply only to the structures currently shown (eye on).",
             commands: [
-                Command(syntax: "show NAME / hide NAME", detail: "Show or hide an object (or water / ligand)"),
+                Command(syntax: "show NAME / hide NAME", detail: "Show or hide an object (or protein / water / ligand)"),
                 Command(syntax: "repr surface NAME", detail: "Set an object's representation"),
                 Command(syntax: "color red NAME", detail: "Recolor an object (or 'default')")
             ]
@@ -88,20 +100,22 @@ struct ManualView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
-                            VStack(alignment: .leading, spacing: 6) {
-                                ForEach(section.commands) { command in
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(command.syntax)
-                                            .font(.system(.footnote, design: .monospaced).weight(.semibold))
-                                        Text(command.detail)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                            if !section.commands.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ForEach(section.commands) { command in
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(command.syntax)
+                                                .font(.system(.footnote, design: .monospaced).weight(.semibold))
+                                            Text(command.detail)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                             }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                         }
                     }
 
