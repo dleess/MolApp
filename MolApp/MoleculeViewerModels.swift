@@ -185,8 +185,10 @@ private func pdfData(from image: UIImage) -> Data? {
 }
 
 func writeTemporaryFile(named name: String, data: Data) -> URL? {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let url = directory.appendingPathComponent(name)
     do {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         try data.write(to: url, options: .atomic)
         return url
     } catch {

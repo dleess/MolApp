@@ -33,6 +33,7 @@ struct MolStarWebView: UIViewRepresentable {
             target: context.coordinator,
             action: #selector(Coordinator.handleHover(_:))
         )
+        hoverRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
         webView.addGestureRecognizer(hoverRecognizer)
 
         let pinchRecognizer = UIPinchGestureRecognizer(

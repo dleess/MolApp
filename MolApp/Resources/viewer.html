@@ -74,11 +74,19 @@
 
       function showError(error) {
         const message = error && error.message ? error.message : String(error);
-        window.molapp = { error: message, handleNativeCommand };
+        const fatal = !window.molapp || !window.molapp.viewer;
+        window.molapp = Object.assign(window.molapp || {}, { error: message, handleNativeCommand });
+        postViewerEvent({ event: 'viewerError', message, fatal });
         document.documentElement.dataset.viewerState = 'error';
         status.classList.add('viewer-status--error');
         status.hidden = false;
-        statusMessage.textContent = 'Mol* initialization failed: ' + message;
+        statusMessage.textContent = 'Mol* viewer error: ' + message;
+      }
+
+      function postViewerEvent(event) {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
+          window.webkit.messageHandlers.molapp.postMessage(event);
+        }
       }
 
       function postCommandResult(result) {
@@ -122,7 +130,7 @@
 
       async function loadStructureAndFocus(loadStructure) {
         const beforeCount = structureCount();
-        clearSelectionVisuals();
+        setMolAppSelection(null);
         await loadStructure();
         await new Promise(function (resolve) {
           requestAnimationFrame(function () {
@@ -138,15 +146,14 @@
       }
 
       // Resolve which loaded structures an action applies to. `payload.targets` is the list
-      // of structure names the user has left visible in the Objects panel; when it is present
-      // and non-empty, actions are scoped to just those. An empty/absent list falls back to
-      // every loaded structure (e.g. a single structure, or nothing tracked yet).
+      // of structure names the user has left visible in the Objects panel. An absent list means
+      // every loaded structure; an explicit empty list means the user has hidden every structure.
       function targetStructures(payload) {
         const all = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
-        const targets = payload && Array.isArray(payload.targets) ? payload.targets : [];
-        if (!targets.length) {
+        if (!payload || !Array.isArray(payload.targets)) {
           return all;
         }
+        const targets = payload.targets;
         // Resolve each name via findStructureObject (matches by tracked structureRef or
         // label) — the structure's cell label does not always equal the loaded PDB name.
         const result = [];
@@ -199,8 +206,8 @@
         await plugin.managers.structure.component.applyPreset(structures, 'preset-structure-representation-polymer-cartoon');
         const refIds = new Set(structures.map(s => s.cell.transform.ref));
         const current = plugin.managers.structure.hierarchy.current.structures;
-        for (const s of current) {
-          if (!refIds.has(s.cell.transform.ref)) continue;
+        const refreshedTargets = current.filter(function (s) { return refIds.has(s.cell.transform.ref); });
+        for (const s of refreshedTargets) {
           const polymer = (s.components || []).filter(function (c) {
             const tags = c.cell.transform.tags;
             return Array.isArray(tags) && tags.indexOf('structure-component-static-polymer') !== -1;
@@ -211,7 +218,7 @@
               comp.cell, { type: 'molecular-surface', color: 'chain-id' });
           }
         }
-        await hideWaterForSurface();
+        await hideWaterForSurface(refreshedTargets);
       }
 
       async function applyRepresentationPreset(representation, structures) {
@@ -225,9 +232,7 @@
           throw new Error('Unknown representation: ' + representation);
         }
 
-        const targets = structures && structures.length
-          ? structures
-          : window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
+        const targets = structures || window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures;
         if (!targets.length) {
           throw new Error('Load a structure before changing representation.');
         }
@@ -248,6 +253,7 @@
         // applyPreset rebuilt the lumped het components visible — re-split so per-ligand
         // visibility survives a representation change (no re-post; rows already exist).
         await refreshLigandSplit(false);
+        await applyStoredFeatureVisibility();
         await resetCamera();
       }
 
@@ -283,10 +289,10 @@
 
       function setMolAppSelection(selection, loci) {
         window.molapp.selection = selection;
-        window.molapp.selectionLoci = loci;
+        window.molapp.selectionLoci = loci || null;
         if (selection && loci) {
           applySelectionVisuals(loci);
-        } else if (!selection) {
+        } else {
           clearSelectionVisuals();
         }
         postSelectionChanged(selection);
@@ -375,7 +381,9 @@
         const location = structureElement.Loci.getFirstLocation(loci);
         const atomName = structureProperties.atom.label_atom_id(location) || structureProperties.atom.auth_atom_id(location) || null;
         const residueName = structureProperties.residue.label_comp_id(location) || structureProperties.residue.auth_comp_id(location) || null;
-        const residueNumber = structureProperties.residue.auth_seq_id(location) || structureProperties.residue.label_seq_id(location) || null;
+        const residueNumber = structureProperties.residue.auth_seq_id(location)
+          ?? structureProperties.residue.label_seq_id(location)
+          ?? null;
         const chain = structureProperties.chain.auth_asym_id(location) || structureProperties.chain.label_asym_id(location) || null;
         const model = structureProperties.unit.model_num(location) || null;
         const labelParts = [residueName, chain, residueNumber, atomName].filter(function (part) {
@@ -403,6 +411,7 @@
       async function performNativeCommand(envelope) {
         const id = envelope && envelope.id ? envelope.id : '';
         const command = envelope && envelope.command ? envelope.command : '';
+        let undoSnapshot = null;
 
         try {
           if (!window.molapp || !window.molapp.viewer) {
@@ -415,12 +424,15 @@
             throw new Error('Unknown MolApp command: ' + command);
           }
 
-          // Snapshot the pre-mutation scene so Edit>Undo can return to it.
-          if (UNDOABLE_COMMANDS.has(command)) pushUndoSnapshot();
+          // Capture before mutation, but commit the history entry only after validation succeeds.
+          // A rejected command must not destroy a valid redo branch.
+          undoSnapshot = UNDOABLE_COMMANDS.has(command) ? captureUndoSnapshot() : null;
 
-          await handler(payload);
-          postCommandResult({ id, command, success: true });
+          const details = await handler(payload);
+          if (undoSnapshot) pushUndoSnapshot(undoSnapshot);
+          postCommandResult(Object.assign({ id, command, success: true }, details || {}));
         } catch (error) {
+          if (error && error.molappMutated && undoSnapshot) pushUndoSnapshot(undoSnapshot);
           const message = error && error.message ? error.message : String(error);
           postCommandResult({ id, command, success: false, error: message });
         }
@@ -433,6 +445,9 @@
           }
 
           const label = payload.label || 'Local structure';
+          if (Object.prototype.hasOwnProperty.call(window.molapp.objects, label)) {
+            throw new Error('An object named "' + label + '" already exists.');
+          }
           await loadStructureAndFocus(function () {
             return window.molapp.viewer.loadStructureFromData(payload.data, payload.format, {
               dataLabel: label
@@ -444,6 +459,9 @@
             structureRef: structures[structures.length - 1]
           };
           await refreshLigandSplit(true);
+          await applyStoredFeatureVisibility();
+          postObjectsReplaced(objectsMeta(), window.molapp.visibility);
+          return { label };
         },
         loadPdbId: async function (payload) {
           const pdbId = String(payload.pdbId || '').trim();
@@ -452,6 +470,9 @@
           }
 
           const normalizedPdbId = pdbId.toUpperCase();
+          if (Object.prototype.hasOwnProperty.call(window.molapp.objects, normalizedPdbId)) {
+            throw new Error('An object named "' + normalizedPdbId + '" already exists.');
+          }
           const url = 'https://files.rcsb.org/download/' + normalizedPdbId + '.cif';
           await loadStructureAndFocus(function () {
             return window.molapp.viewer.loadStructureFromUrl(url, 'mmcif', false, {
@@ -464,9 +485,23 @@
             structureRef: structures[structures.length - 1]
           };
           await refreshLigandSplit(true);
+          await applyStoredFeatureVisibility();
+          postObjectsReplaced(objectsMeta(), window.molapp.visibility);
+          return { label: normalizedPdbId };
         },
         setRepresentation: async function (payload) {
-          await applyRepresentationPreset(payload.representation || '', targetStructures(payload));
+          const structures = targetStructures(payload);
+          const targetRefs = new Set(structures.map(function (s) { return s.cell.transform.ref; }));
+          await applyRepresentationPreset(payload.representation || '', structures);
+          for (const name in window.molapp.objects) {
+            const object = window.molapp.objects[name];
+            const target = object.type === 'structure' ? findStructureObject(name) : null;
+            if (target && targetRefs.has(target.cell.transform.ref)) {
+              object.structureRef = target;
+              object.representation = payload.representation;
+            }
+          }
+          postObjectsReplaced(objectsMeta(), window.molapp.visibility);
         },
         toggleVisibility: async function (payload) {
           const feature = payload.feature; // 'water' or 'ligand'
@@ -499,6 +534,7 @@
             }
             // Sync the per-ligand row eyes to the master toggle (they are separate native controls).
             postObjectVisibility(synced);
+            postFeatureVisibility(feature, isVisible);
             return;
           }
 
@@ -528,6 +564,7 @@
               }
             }
           }
+          postFeatureVisibility(feature, isVisible);
         },
         focusSelection: async function () {
           const plugin = window.molapp.viewer.plugin;
@@ -548,8 +585,7 @@
           const structures = plugin.managers.structure.hierarchy.current.structures;
 
           if (structures.length === 0) {
-            setMolAppSelection(payload);
-            return;
+            throw new Error('Load a structure before selecting.');
           }
 
           // Step 1: loci 계산 — 실패 시 조기 종료
@@ -561,8 +597,7 @@
             bundle = window.molstar.lib.structure.StructureElement.Bundle.fromLoci(loci);
           } catch (error) {
             console.error('Selection query failed:', error);
-            setMolAppSelection(payload);
-            return;
+            throw error;
           }
 
           // Step 2: loci 비어있으면 dim 방지 — empty loci로 selectOnly 호출 시 뷰포트 흑화
@@ -571,9 +606,7 @@
           const isLociEmpty = !loci ||
             (StructElem && StructElem.Loci.is(loci) && StructElem.Loci.isEmpty(loci));
           if (isLociEmpty) {
-            clearSelectionVisuals();
-            postSelectionChanged(payload);
-            return;
+            throw new Error('Selection matched no atoms.');
           }
 
           // Step 2b: named expression selection vs ad-hoc selection
@@ -587,6 +620,11 @@
             return;
           }
 
+          const existing = window.molapp.objects[selName];
+          if (existing && (existing.type === 'structure' || existing.ligandSplit)) {
+            throw new Error('An object named "' + selName + '" already exists.');
+          }
+
           // Track metadata + selection state without applying highlight/select markers.
           window.molapp.selection = payload;
           window.molapp.selectionLoci = loci;
@@ -598,7 +636,7 @@
             const compSelector = await plugin.builders.structure.tryCreateComponent(
               structures[0].cell,
               { type: { name: 'bundle', params: bundle }, nullIfEmpty: true, label: selName },
-              selName
+              selectionComponentKey(selName)
             );
             if (compSelector?.cell) {
               await plugin.builders.structure.representation.addRepresentation(
@@ -614,10 +652,12 @@
                 loci,
                 bundle,
                 colorHex: null,
+                representation: 'ribbon',
                 componentRef: compSelector.ref
               };
+              postObjectsReplaced(objectsMeta(), window.molapp.visibility);
             } else {
-              window.molapp.objects[selName] = { type: 'selection', loci, bundle, colorHex: null, componentRef: null };
+              throw new Error('Selection component could not be created.');
             }
           } catch (componentError) {
             console.error('[MolApp] Selection component creation failed:', componentError);
@@ -626,7 +666,9 @@
             status.hidden = false;
             statusMessage.textContent = 'Selection rendering failed: ' + errMsg;
             setTimeout(() => { status.hidden = true; }, 5000);
-            window.molapp.objects[selName] = { type: 'selection', loci, bundle, colorHex: null, componentRef: null };
+            setMolAppSelection(null);
+            componentError.molappMutated = true;
+            throw componentError;
           }
         },
         clearSelection: async function () {
@@ -636,13 +678,13 @@
         setObjectVisibility: async function (payload) {
           const { name, isVisible } = payload;
           const obj = window.molapp.objects[name];
-          if (!obj) return;
+          if (!obj) throw new Error('Unknown object: ' + name);
 
           const plugin = window.molapp.viewer.plugin;
 
           if (obj.type === 'structure') {
             const target = findStructureObject(name);
-            if (!target) return;
+            if (!target) throw new Error('Structure is unavailable: ' + name);
             const isCurrentlyHidden = target.cell.state.isHidden;
             if (Boolean(isCurrentlyHidden) === Boolean(isVisible)) {
               plugin.managers.structure.hierarchy.toggleVisibility([target]);
@@ -659,21 +701,21 @@
             if (synced.length) postObjectVisibility(synced);
           } else if (obj.type === 'selection') {
             const comp = findSelectionComponent(name);
-            if (comp) {
-              const isCurrentlyHidden = comp.cell.state.isHidden;
-              if (Boolean(isCurrentlyHidden) === Boolean(isVisible)) {
-                plugin.managers.structure.component.toggleVisibility([comp]);
-              }
+            if (!comp) throw new Error('Selection is unavailable: ' + name);
+            const isCurrentlyHidden = comp.cell.state.isHidden;
+            if (Boolean(isCurrentlyHidden) === Boolean(isVisible)) {
+              plugin.managers.structure.component.toggleVisibility([comp]);
             }
             // Remember desired visibility so a re-split (after a repr change) can restore it.
             obj.isHidden = !isVisible;
           }
+          postObjectsReplaced(objectsMeta(), window.molapp.visibility);
         },
 
         setObjectRepresentation: async function (payload) {
           const { name, representation } = payload;
           const obj = window.molapp.objects[name];
-          if (!obj) return;
+          if (!obj) throw new Error('Unknown object: ' + name);
 
           const plugin = window.molapp.viewer.plugin;
 
@@ -688,7 +730,7 @@
             const preset = presetMap[representation];
             if (!preset) throw new Error('Unknown representation: ' + representation);
             const target = findStructureObject(name);
-            if (!target) return;
+            if (!target) throw new Error('Structure is unavailable: ' + name);
             if (representation === 'surface') {
               await applySurfaceRepresentation([target]);
             } else {
@@ -703,9 +745,10 @@
             // applyPreset on this structure rebuilt its lumped het components — re-split so the
             // per-ligand rows stay in control (no double-render) after a structure repr change.
             await refreshLigandSplit(false);
+            await applyStoredFeatureVisibility();
           } else if (obj.type === 'selection' && obj.loci) {
             const structures = plugin.managers.structure.hierarchy.current.structures;
-            if (!structures.length) return;
+            if (!structures.length || !obj.bundle) throw new Error('Selection is unavailable: ' + name);
             const reprTypeMap = {
               ribbon:       'cartoon',
               surface:      'molecular-surface',
@@ -719,43 +762,44 @@
               : representation === 'ballAndStick'
                 ? { visuals: BALL_AND_STICK_VISUALS.slice() }
                 : null;
-            if (obj.bundle) {
-              let comp = findSelectionComponent(name);
-              if (!comp) {
-                const compSelector = await plugin.builders.structure.tryCreateComponent(
-                  structures[0].cell,
-                  { type: { name: 'bundle', params: obj.bundle }, nullIfEmpty: true, label: name },
-                  name
-                );
-                comp = compSelector || null;
-              }
-
-              if (comp?.cell) {
-                await clearComponentRepresentations(comp);
-                const colorHex = obj.colorHex || null;
-                const colorVal = colorHex ? hexToMolStarColor(colorHex) : 0x0072B2; // Okabe-Ito blue
-                await plugin.builders.structure.representation.addRepresentation(
-                  comp.cell,
-                  {
-                    type: reprType,
-                    ...(typeParams ? { typeParams } : {}),
-                    color: 'uniform',
-                    colorParams: { value: colorVal }
-                  }
-                );
-                obj.componentRef = comp.ref || comp.cell.transform.ref;
-                obj.representation = representation;
-              } else {
-                obj.componentRef = null;
-              }
+            let comp = findSelectionComponent(name);
+            if (!comp) {
+              const compSelector = await plugin.builders.structure.tryCreateComponent(
+                structures[0].cell,
+                { type: { name: 'bundle', params: obj.bundle }, nullIfEmpty: true, label: name },
+                selectionComponentKey(name)
+              );
+              comp = compSelector || null;
             }
+
+            if (!comp?.cell) throw new Error('Selection component could not be created: ' + name);
+            await clearComponentRepresentations(comp);
+            const colorHex = obj.colorHex || null;
+            const colorVal = colorHex ? hexToMolStarColor(colorHex) : 0x0072B2; // Okabe-Ito blue
+            await plugin.builders.structure.representation.addRepresentation(
+              comp.cell,
+              {
+                type: reprType,
+                ...(typeParams ? { typeParams } : {}),
+                color: 'uniform',
+                colorParams: { value: colorVal }
+              }
+            );
+            obj.componentRef = comp.ref || comp.cell.transform.ref;
+            obj.representation = representation;
+          } else {
+            throw new Error('Selection is unavailable: ' + name);
           }
+          postObjectsReplaced(objectsMeta(), window.molapp.visibility);
         },
 
         setObjectColor: async function (payload) {
           const { name, colorHex } = payload;
           const obj = window.molapp.objects[name];
-          if (!obj) return;
+          if (!obj) throw new Error('Unknown object: ' + name);
+          if (colorHex !== null && colorHex !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(colorHex)) {
+            throw new Error('Color must use #RRGGBB format.');
+          }
 
           const plugin = window.molapp.viewer.plugin;
           const theme = colorHex
@@ -764,20 +808,20 @@
 
           if (obj.type === 'structure') {
             const target = findStructureObject(name);
-            if (!target) return;
+            if (!target) throw new Error('Structure is unavailable: ' + name);
             await plugin.managers.structure.component.updateRepresentationsTheme(
               target.components, theme
             );
           } else if (obj.type === 'selection') {
             const comp = findSelectionComponent(name);
-            if (comp) {
-              await plugin.managers.structure.component.updateRepresentationsTheme([comp], theme);
-            }
+            if (!comp) throw new Error('Selection is unavailable: ' + name);
+            await plugin.managers.structure.component.updateRepresentationsTheme([comp], theme);
           }
           // Track colorHex for repr-change reapplication
           if (window.molapp.objects[name]) {
             window.molapp.objects[name].colorHex = colorHex;
           }
+          postObjectsReplaced(objectsMeta(), window.molapp.visibility);
         },
 
         surfacePotential: async function (payload) {
@@ -875,8 +919,10 @@
             structures,
             'preset-structure-representation-polymer-cartoon'
           );
+          const targetRefs = new Set(structures.map(function (s) { return s.cell.transform.ref; }));
           const refreshed = plugin.managers.structure.hierarchy.current.structures;
           for (const s of refreshed) {
+            if (!targetRefs.has(s.cell.transform.ref)) continue;
             const components = (s.components || []).filter(function (c) {
               return c && c.cell && c.cell.obj;
             });
@@ -890,6 +936,7 @@
           window.molapp.representation = 'secondary-structure';
           // The cartoon preset rebuilt the lumped het components — re-split to keep per-ligand rows.
           await refreshLigandSplit(false);
+          await applyStoredFeatureVisibility();
           await resetCamera();
         },
 
@@ -958,15 +1005,15 @@
 
         resetAll: async function () {
           const plugin = window.molapp.viewer.plugin;
+          await stopTransientModes();
           await plugin.clear(true); // true → also reset camera/viewport
-          window.molapp.objects = {};
+          window.molapp.objects = Object.create(null);
           window.molapp.ligandResns = [];
           window.molapp.visibility = {};
-          window.molapp.selection = null;
-          window.molapp.selectionLoci = null;
           window.molapp.surfacePotentialRefs = [];
           window.molapp.representation = null;
-          clearSelectionVisuals();
+          setMolAppSelection(null);
+          postObjectsReplaced([], {});
         },
 
         loadState: async function (payload) {
@@ -1499,7 +1546,7 @@
           const comp = await plugin.builders.structure.tryCreateComponent(
             s.cell,
             { type: { name: 'bundle', params: bundle }, nullIfEmpty: true, label: resn },
-            resn
+            selectionComponentKey(resn)
           );
           if (!comp || !comp.cell) continue;
           await plugin.builders.structure.representation.addRepresentation(
@@ -1556,10 +1603,11 @@
       // Molecular surface is computed per atom, so each isolated crystallographic water becomes a
       // lone sphere — a red-dot cloud over the surface. Every viewer hides water under a surface;
       // do the same and sync the native Water toggle so it reads "Show Water".
-      async function hideWaterForSurface() {
+      async function hideWaterForSurface(structures) {
         const plugin = window.molapp.viewer.plugin;
-        const structures = plugin.managers.structure.hierarchy.current.structures;
-        for (const s of structures) {
+        const all = plugin.managers.structure.hierarchy.current.structures;
+        const targets = structures || all;
+        for (const s of targets) {
           const water = (s.components || []).filter(function (c) {
             const tags = c.cell.transform.tags;
             return Array.isArray(tags) && tags.indexOf('structure-component-static-water') !== -1;
@@ -1567,8 +1615,13 @@
           const visible = water.filter(function (c) { return !Boolean(c.cell.state.isHidden); });
           if (visible.length) plugin.managers.structure.component.toggleVisibility(visible);
         }
-        window.molapp.visibility.water = false;
-        postFeatureVisibility('water', false);
+        const targetRefs = new Set(targets.map(function (s) { return s.cell.transform.ref; }));
+        const affectsAll = all.length === targets.length
+          && all.every(function (s) { return targetRefs.has(s.cell.transform.ref); });
+        if (affectsAll) {
+          window.molapp.visibility.water = false;
+          postFeatureVisibility('water', false);
+        }
       }
 
       // --- Undo / redo (Mol* whole-scene snapshots) -------------------------------------------
@@ -1583,7 +1636,7 @@
 
       function snapshotMolApp() {
         const plugin = window.molapp.viewer.plugin;
-        const objects = {};
+        const objects = Object.create(null);
         for (const k in window.molapp.objects) objects[k] = Object.assign({}, window.molapp.objects[k]);
         return {
           molstar: plugin.state.getSnapshot(),
@@ -1599,42 +1652,55 @@
         for (const name in window.molapp.objects) {
           const o = window.molapp.objects[name];
           let isVisible = true;
+          let structureRef = null;
           if (o.type === 'structure') {
             const t = findStructureObject(name);
             isVisible = t ? !Boolean(t.cell.state.isHidden) : true;
+            structureRef = t ? t.cell.transform.ref : null;
           } else {
             const c = findSelectionComponent(name);
             isVisible = c ? !Boolean(c.cell.state.isHidden) : !Boolean(o.isHidden);
           }
           // ponytail: repr indicator best-effort; scene is authoritative, row highlight may reset.
           const representation = o.representation || (o.type === 'structure' ? 'ribbon' : 'ballAndStick');
-          items.push({ name: name, type: o.type, isVisible: isVisible, representation: representation, colorHex: o.colorHex || null });
+          items.push({
+            name: name,
+            type: o.type,
+            isVisible: isVisible,
+            representation: representation,
+            colorHex: o.colorHex || null,
+            structureRef: structureRef
+          });
         }
         return items;
       }
 
       async function restoreMolApp(snap) {
         const plugin = window.molapp.viewer.plugin;
+        await stopTransientModes();
         await plugin.state.setSnapshot(snap.molstar);
         window.molapp.objects = snap.objects;
         window.molapp.ligandResns = snap.ligandResns.slice();
         window.molapp.visibility = Object.assign({}, snap.visibility);
         // setSnapshot rebuilt the structures, so any tracked selection now points at detached loci —
         // drop it (and clear the highlight/dim overlay) so a later double-tap doesn't focus stale loci.
-        window.molapp.selection = null;
-        window.molapp.selectionLoci = null;
-        clearSelectionVisuals();
+        setMolAppSelection(null);
         postObjectsReplaced(objectsMeta(), window.molapp.visibility);
       }
 
-      function pushUndoSnapshot() {
+      function captureUndoSnapshot() {
         try {
-          window.molapp.undoStack.push(snapshotMolApp());
-          if (window.molapp.undoStack.length > 25) window.molapp.undoStack.shift();
-          window.molapp.redoStack = [];
+          return snapshotMolApp();
         } catch (error) {
           console.error('[MolApp] Undo snapshot failed:', error);
+          return null;
         }
+      }
+
+      function pushUndoSnapshot(snapshot) {
+        window.molapp.undoStack.push(snapshot);
+        if (window.molapp.undoStack.length > 25) window.molapp.undoStack.shift();
+        window.molapp.redoStack = [];
       }
 
       // --- Save / read .molapp state -----------------------------------------------------------
@@ -1658,27 +1724,55 @@
         const parsed = JSON.parse(json);
         if (!parsed || !parsed.molstar) throw new Error('Not a valid .molapp file.');
         if (parsed.version !== 1) throw new Error('Unsupported .molapp version.');
+        if (!Array.isArray(parsed.objects)
+            || !Array.isArray(parsed.ligandResns)
+            || !parsed.visibility
+            || typeof parsed.visibility !== 'object'
+            || Array.isArray(parsed.visibility)
+            || !parsed.objects.every(function (o) {
+              return o && typeof o.name === 'string' && (o.type === 'structure' || o.type === 'selection');
+            })
+            || !parsed.ligandResns.every(function (name) { return typeof name === 'string'; })
+            || !Object.values(parsed.visibility).every(function (value) { return typeof value === 'boolean'; })) {
+          throw new Error('Not a valid .molapp file.');
+        }
+        const savedNames = parsed.objects.map(function (o) { return o.name; });
+        const savedRefs = parsed.objects
+          .map(function (o) { return o.structureRef; })
+          .filter(function (ref) { return ref !== null && ref !== undefined; });
+        if (new Set(savedNames).size !== savedNames.length
+            || !savedRefs.every(function (ref) { return typeof ref === 'string'; })
+            || new Set(savedRefs).size !== savedRefs.length) {
+          throw new Error('Not a valid .molapp file.');
+        }
         const plugin = window.molapp.viewer.plugin;
         const lib = window.molstar.lib.structure;
+        await stopTransientModes();
         await plugin.state.setSnapshot(parsed.molstar);
         // Mol* restores with revertOnError:false, so a PDB structure that fails to re-fetch (offline)
         // leaves setSnapshot resolved with that cell simply absent. Re-derive objects from the LIVE
         // restored state: keep only those whose cell actually came back (no phantom rows), rebuilding
         // each selection's bundle from its component so ligand rows stay editable. Collect the misses.
-        // Map restored structures to their saved metas BY ORDER — not by label. A restored structure's
-        // cell label isn't guaranteed to equal the saved name (findStructureObject only matched
-        // originally via the stored structureRef, which a fresh load doesn't have), so a label match
-        // would false-fail a structure that actually loaded. Snapshot preserves load order, so index
-        // i in the saved structure list ↔ index i in the restored hierarchy.
-        const objects = {};
+        // Match by the stable snapshot transform ref so one failed remote fetch cannot shift every
+        // later row onto the wrong saved name. Older version-1 files without refs fall back to order.
+        const objects = Object.create(null);
         const failed = [];
         const restored = plugin.managers.structure.hierarchy.current.structures;
+        const restoredByRef = new Map(restored.map(function (s) { return [s.cell.transform.ref, s]; }));
+        const usedStructureRefs = new Set();
         let structureIdx = 0;
         for (const meta of (parsed.objects || [])) {
           if (meta.type === 'selection') {
             const comp = findSelectionComponent(meta.name);
             if (!comp || !comp.cell.obj || !comp.cell.obj.data) continue;
-            const o = { type: 'selection', colorHex: meta.colorHex || null, representation: meta.representation, isHidden: !meta.isVisible, componentRef: comp.cell.transform.ref };
+            const o = {
+              type: 'selection',
+              colorHex: meta.colorHex || null,
+              representation: meta.representation,
+              isHidden: !meta.isVisible,
+              componentRef: comp.cell.transform.ref,
+              ligandSplit: (parsed.ligandResns || []).indexOf(meta.name) !== -1
+            };
             try {
               const loci = lib.Structure.toStructureElementLoci(comp.cell.obj.data);
               o.loci = loci;
@@ -1686,21 +1780,33 @@
             } catch (e) { /* bundle stays undefined; row still shows, repr edits no-op */ }
             objects[meta.name] = o;
           } else {
-            const t = restored[structureIdx++];
+            let t = meta.structureRef ? restoredByRef.get(meta.structureRef) : null;
+            if (!meta.structureRef) {
+              t = restored.find(function (s) {
+                return !usedStructureRefs.has(s.cell.transform.ref) && s.cell.obj?.label === meta.name;
+              });
+              while (!t && structureIdx < restored.length) {
+                const candidate = restored[structureIdx++];
+                if (!usedStructureRefs.has(candidate.cell.transform.ref)) t = candidate;
+              }
+            }
             if (!t) { failed.push(meta.name); continue; }
+            usedStructureRefs.add(t.cell.transform.ref);
             objects[meta.name] = { type: 'structure', colorHex: meta.colorHex || null, representation: meta.representation, isHidden: !meta.isVisible, structureRef: t };
           }
         }
         window.molapp.objects = objects;
         window.molapp.ligandResns = (parsed.ligandResns || []).slice();
         window.molapp.visibility = Object.assign({}, parsed.visibility || {});
-        window.molapp.selection = null;
-        window.molapp.selectionLoci = null;
-        clearSelectionVisuals();
+        setMolAppSelection(null);
         // Panel first (from what actually loaded), then surface any misses so the error banner shows.
         // The partial scene stays visible; Edit>Undo restores the pre-load state if the user wants.
         postObjectsReplaced(objectsMeta(), window.molapp.visibility);
-        if (failed.length) throw new Error('Could not load: ' + failed.join(', ') + ' (offline or unavailable).');
+        if (failed.length) {
+          const error = new Error('Could not load: ' + failed.join(', ') + ' (offline or unavailable).');
+          error.molappMutated = true;
+          throw error;
+        }
       }
 
       // PNG data URI of the current viewport. getImageDataUri() draws a fresh frame then reads it,
@@ -1715,6 +1821,19 @@
         return await vs.getImageDataUri();
       }
 
+      async function stopTransientModes() {
+        const plugin = window.molapp.viewer.plugin;
+        if (window.molapp.measureMode) {
+          plugin.managers.interactivity.setProps({ granularity: window.molapp.prevGranularity || 'residue' });
+        }
+        window.molapp.measureMode = false;
+        window.molapp.measureKind = 'distance';
+        window.molapp.measurePending = [];
+        window.molapp.prevGranularity = null;
+        window.molapp.morphing = false;
+        await plugin.managers.animation.stop();
+      }
+
       // Split ligands after a load/preset without letting a failure break the caller.
       async function refreshLigandSplit(postObjects) {
         try {
@@ -1725,23 +1844,39 @@
         }
       }
 
+      async function applyStoredFeatureVisibility() {
+        for (const feature of ['protein', 'water', 'ligand']) {
+          if (window.molapp.visibility[feature] === false) {
+            await commandHandlers.toggleVisibility({ feature: feature, isVisible: false });
+          }
+        }
+      }
+
       function findSelectionComponent(name) {
         const plugin = window.molapp.viewer.plugin;
         const structures = plugin.managers.structure.hierarchy.current.structures;
         // tryCreateComponent stores its key under the tag `structure-component-${key}`.
-        const tag = 'structure-component-' + name;
+        const tag = 'structure-component-' + selectionComponentKey(name);
+        const legacyTag = 'structure-component-' + name;
         const stored = window.molapp.objects && window.molapp.objects[name];
         const ref = stored && stored.componentRef;
         for (const s of structures) {
           for (const c of (s.components || [])) {
             const cellRef = c.cell.transform.ref;
             const cellTags = c.cell.transform.tags;
-            if ((ref && cellRef === ref) || (Array.isArray(cellTags) && cellTags.includes(tag))) {
+            const isLegacySelection = Array.isArray(cellTags)
+              && cellTags.includes(legacyTag)
+              && c.cell.obj?.label === name;
+            if ((ref && cellRef === ref) || (Array.isArray(cellTags) && cellTags.includes(tag)) || isLegacySelection) {
               return c;
             }
           }
         }
         return null;
+      }
+
+      function selectionComponentKey(name) {
+        return 'molapp-' + encodeURIComponent(name);
       }
 
       function findStructureObject(name) {
@@ -1945,7 +2080,7 @@
           measureKind: 'distance',
           measurePending: [],
           prevGranularity: null,
-          objects: {},
+          objects: Object.create(null),
           ligandResns: [],
           undoStack: [],
           redoStack: [],
@@ -1966,6 +2101,7 @@
         try { registerEspColorTheme(); } catch (themeError) { console.error('[MolApp] ESP theme registration failed at init:', themeError); }
         document.documentElement.dataset.viewerState = 'ready';
         status.hidden = true;
+        postViewerEvent({ event: 'viewerReady' });
       }
 
       initializeViewer().catch(showError);

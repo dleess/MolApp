@@ -31,12 +31,14 @@ struct MolStarCommandResult: Decodable {
     let command: MolStarCommandName?
     let success: Bool
     let error: String?
+    let label: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
         case command
         case success
         case error
+        case label
     }
 
     init(from decoder: Decoder) throws {
@@ -44,6 +46,7 @@ struct MolStarCommandResult: Decodable {
         id = try container.decode(String.self, forKey: .id)
         success = try container.decode(Bool.self, forKey: .success)
         error = try container.decodeIfPresent(String.self, forKey: .error)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
 
         if let rawCommand = try container.decodeIfPresent(String.self, forKey: .command) {
             command = MolStarCommandName(rawValue: rawCommand)
@@ -158,10 +161,11 @@ final class MolStarBridge: NSObject, ObservableObject {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var pendingScripts: [String] = []
-    private var isEvaluatingScript = false
+    private(set) var isViewerReady = false
 
     func attach(webView: WKWebView) {
         self.webView = webView
+        isViewerReady = false
     }
 
     func updateHoverPoint(_ point: CGPoint?) {
@@ -207,17 +211,14 @@ final class MolStarBridge: NSObject, ObservableObject {
 
     func setObjectVisibility(name: String, isVisible: Bool) {
         send(.setObjectVisibility, payload: ObjectVisibilityPayload(name: name, isVisible: isVisible))
-        updateObject(name: name) { $0.isVisible = isVisible }
     }
 
     func setObjectRepresentation(name: String, representation: ObjectRepresentation) {
         send(.setObjectRepresentation, payload: ObjectRepresentationPayload(name: name, representation: representation.rawValue))
-        updateObject(name: name) { $0.representation = representation }
     }
 
     func setObjectColor(name: String, colorHex: String?) {
         send(.setObjectColor, payload: ObjectColorPayload(name: name, colorHex: colorHex))
-        updateObject(name: name) { $0.colorHex = colorHex }
     }
 
     func drawSurfacePotential(targets: [String] = []) {
@@ -250,8 +251,6 @@ final class MolStarBridge: NSObject, ObservableObject {
 
     func resetAll() {
         send(.resetAll, payload: EmptyPayload())
-        objects = []
-        featureVisibility = [:]
     }
 
     func undo() {
@@ -319,25 +318,20 @@ final class MolStarBridge: NSObject, ObservableObject {
 
     private func enqueueScript(_ script: String) {
         pendingScripts.append(script)
-        evaluateNextScriptIfNeeded()
+        flushPendingScripts()
     }
 
-    private func evaluateNextScriptIfNeeded() {
-        guard !isEvaluatingScript, !pendingScripts.isEmpty else { return }
-        guard let webView else {
-            pendingScripts.removeAll()
-            return
-        }
-
-        isEvaluatingScript = true
-        let script = pendingScripts.removeFirst()
-        webView.evaluateJavaScript(script) { [weak self] _, error in
-            guard let self else { return }
-            if let error {
-                self.lastErrorMessage = error.localizedDescription
+    private func flushPendingScripts() {
+        guard isViewerReady, !pendingScripts.isEmpty, let webView else { return }
+        let scripts = pendingScripts
+        pendingScripts.removeAll()
+        for script in scripts {
+            webView.evaluateJavaScript(script) { [weak self] _, error in
+                guard let self else { return }
+                if let error {
+                    self.lastErrorMessage = error.localizedDescription
+                }
             }
-            self.isEvaluatingScript = false
-            self.evaluateNextScriptIfNeeded()
         }
     }
 
@@ -348,6 +342,19 @@ final class MolStarBridge: NSObject, ObservableObject {
 
     func receive(messageBody: Any) throws {
         let data = try JSONSerialization.data(withJSONObject: messageBody)
+
+        if let dict = messageBody as? [String: Any], dict["event"] as? String == "viewerReady" {
+            isViewerReady = true
+            lastErrorMessage = nil
+            flushPendingScripts()
+            return
+        }
+
+        if let dict = messageBody as? [String: Any], dict["event"] as? String == "viewerError" {
+            if dict["fatal"] as? Bool == true { isViewerReady = false }
+            lastErrorMessage = dict["message"] as? String ?? "Mol* viewer error."
+            return
+        }
 
         if let dict = messageBody as? [String: Any], dict["event"] as? String == "selectionChanged" {
             currentSelection = try decoder.decode(MolStarSelectionEvent.self, from: data).selection
@@ -394,7 +401,7 @@ final class MolStarBridge: NSObject, ObservableObject {
         // ("Show/Hide Water") stays truthful. The View observes featureVisibility to update its state.
         if let dict = messageBody as? [String: Any], dict["event"] as? String == "featureVisibility",
            let feature = dict["feature"] as? String, let isVisible = dict["isVisible"] as? Bool {
-            featureVisibility = [feature: isVisible]
+            featureVisibility[feature] = isVisible
             return
         }
 
