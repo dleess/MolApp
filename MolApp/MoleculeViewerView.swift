@@ -22,19 +22,18 @@ enum MeasureKind: String, CaseIterable, Identifiable {
     }
 }
 
+private let defaultVisibilityStates = Dictionary(
+    uniqueKeysWithValues: MoleculeVisibilityFeature.allCases.map { ($0, true) }
+)
+
 struct MoleculeViewerView: View {
     @StateObject private var bridge = MolStarBridge()
     @State private var isFileImporterPresented = false
     @State private var pdbIdText = ""
     @State private var selectedRepresentation: MoleculeRepresentation = .ribbon
-    @State private var visibilityStates: [MoleculeVisibilityFeature: Bool] = [
-        .protein: true,
-        .water: true,
-        .ligand: true
-    ]
+    @State private var visibilityStates = defaultVisibilityStates
     @State private var statusMessage = "Ready for structure loading"
     @State private var localErrorMessage: String?
-    @State private var pendingStructureLabel: String?
     @State private var commandText = ""
     @State private var isObjectsPanelExpanded = true
     @State private var colorPickerTarget: String? = nil
@@ -124,9 +123,6 @@ struct MoleculeViewerView: View {
         .sheet(isPresented: $isManualPresented) {
             ManualView()
         }
-        .onReceive(bridge.$lastErrorMessage) { message in
-            localErrorMessage = message
-        }
         .onReceive(bridge.$lastMeasurement) { label in
             guard let label else { return }
             statusMessage = "\(measureKind?.title ?? "Distance"): \(label)"
@@ -136,19 +132,11 @@ struct MoleculeViewerView: View {
 
             switch result.command {
             case .loadLocalStructure:
-                let label = pendingStructureLabel ?? "Structure"
+                let label = result.label ?? "Structure"
                 statusMessage = "Loaded \(label)"
-                bridge.addObject(MolAppObject(name: label, type: .structure))
-                pendingStructureLabel = nil
-                visibilityStates = [.protein: true, .water: true, .ligand: true]
             case .loadPdbId:
-                // Use the label captured at send time, not the live field — the field may have
-                // changed during the async fetch, which would name the object off the JS key.
-                let name = pendingStructureLabel ?? pdbIdText.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let name = result.label ?? PdbIdentifier.displayName(from: pdbIdText)
                 statusMessage = "Loaded \(name)"
-                bridge.addObject(MolAppObject(name: name, type: .structure))
-                pendingStructureLabel = nil
-                visibilityStates = [.protein: true, .water: true, .ligand: true]
             case .setRepresentation:
                 statusMessage = "\(selectedRepresentation.title) representation"
             case .surfacePotential:
@@ -163,13 +151,28 @@ struct MoleculeViewerView: View {
                 statusMessage = "Superposed visible structures"
             case .secondaryStructure:
                 statusMessage = "Secondary structure (helix/sheet/coil)"
+            case .resetAll:
+                measureKind = nil
+                isMorphing = false
+                statusMessage = "Reset — everything cleared"
+            case .undo:
+                measureKind = nil
+                isMorphing = false
+                statusMessage = "Undid last change"
+            case .redo:
+                measureKind = nil
+                isMorphing = false
+                statusMessage = "Redid last change"
             case .loadState:
+                measureKind = nil
+                isMorphing = false
                 statusMessage = "State loaded"
             default:
                 break
             }
         }
         .onReceive(bridge.$featureVisibility) { dict in
+            visibilityStates = defaultVisibilityStates
             for (key, isVisible) in dict {
                 if let feature = MoleculeVisibilityFeature(rawValue: key) {
                     visibilityStates[feature] = isVisible
@@ -283,8 +286,7 @@ struct MoleculeViewerView: View {
                 Button(role: .destructive) {
                     localErrorMessage = nil
                     bridge.resetAll()
-                    visibilityStates = [.protein: true, .water: true, .ligand: true]
-                    statusMessage = "Reset — everything cleared"
+                    statusMessage = "Resetting…"
                 } label: {
                     Label("Reset All", systemImage: "arrow.counterclockwise")
                 }
@@ -323,6 +325,7 @@ struct MoleculeViewerView: View {
                         } label: {
                             Label(representation.title, systemImage: representation.systemImage)
                         }
+                        .disabled(visibleStructureNames.isEmpty)
                     }
                 }
 
@@ -348,6 +351,7 @@ struct MoleculeViewerView: View {
                 } label: {
                     Label("Surface Potential", systemImage: "bolt.circle")
                 }
+                .disabled(visibleStructureNames.isEmpty)
 
                 Button {
                     localErrorMessage = nil
@@ -382,6 +386,7 @@ struct MoleculeViewerView: View {
                             systemImage: isMorphing ? "stop.circle" : "play.circle"
                         )
                     }
+                    .disabled(!isMorphing && visibleStructureNames.isEmpty)
                 }
             }
 
@@ -482,6 +487,7 @@ struct MoleculeViewerView: View {
         guard !input.isEmpty else { return }
 
         commandText = ""
+        localErrorMessage = nil
         let components = input.lowercased().components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         // Object names (PDB IDs, file labels) are stored case-sensitively (uppercase for PDB IDs),
         // so keep an original-case token list for name arguments — only keywords are lowercased.
@@ -499,7 +505,7 @@ struct MoleculeViewerView: View {
         case "repr":
             if components.count >= 3 {
                 let reprStr = components[1]
-                let objName = rawComponents[2]
+                let objName = rawComponents.dropFirst(2).joined(separator: " ")
                 if let repr = ObjectRepresentation.allCases.first(where: { $0.rawValue.lowercased() == reprStr }) {
                     bridge.setObjectRepresentation(name: objName, representation: repr)
                 } else {
@@ -523,7 +529,7 @@ struct MoleculeViewerView: View {
                         toggleVisibility(feature)
                     }
                 } else {
-                    bridge.setObjectVisibility(name: rawComponents[1], isVisible: isVisible)
+                    bridge.setObjectVisibility(name: rawComponents.dropFirst().joined(separator: " "), isVisible: isVisible)
                 }
             } else {
                 localErrorMessage = "Usage: \(command) [water|ligand|objectname]"
@@ -541,7 +547,6 @@ struct MoleculeViewerView: View {
                     let ast = try parser.parse()
                     let selection = MoleculeSelection(type: "expression", label: "\(selectionName): \(expression)", ast: ast)
                     bridge.setSelection(selection)
-                    bridge.addObject(MolAppObject(name: selectionName, type: .selection))
                 } catch {
                     localErrorMessage = error.localizedDescription
                 }
@@ -549,7 +554,7 @@ struct MoleculeViewerView: View {
         case "color":
             if components.count >= 3 {
                 let colorArg = components[1]
-                let objName = rawComponents[2]
+                let objName = rawComponents.dropFirst(2).joined(separator: " ")
                 let colorHex: String? = colorArg == "default" ? nil : colorNameToHex(colorArg)
                 bridge.setObjectColor(name: objName, colorHex: colorHex)
             } else {
@@ -606,7 +611,6 @@ struct MoleculeViewerView: View {
             guard let url = try result.get().first else { return }
             let structure = try LocalStructureFileLoader.load(from: url)
             statusMessage = "Loading \(structure.label)"
-            pendingStructureLabel = structure.label
             localErrorMessage = nil
             bridge.loadLocalStructure(data: structure.data, format: structure.format, label: structure.label)
         } catch {
@@ -683,7 +687,6 @@ struct MoleculeViewerView: View {
             let pdbId = try PdbIdentifier.normalized(pdbIdText)
             pdbIdText = pdbId
             statusMessage = "Loading \(pdbId)"
-            pendingStructureLabel = pdbId
             localErrorMessage = nil
             bridge.loadPdbId(pdbId)
         } catch {
