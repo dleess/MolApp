@@ -11,7 +11,7 @@ struct MolStarWebView: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(bridge: bridge)
+        Coordinator(bridge: bridge, htmlResourceName: htmlResourceName)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -42,50 +42,59 @@ struct MolStarWebView: UIViewRepresentable {
         )
         pinchRecognizer.delegate = context.coordinator
         webView.addGestureRecognizer(pinchRecognizer)
+        webView.navigationDelegate = context.coordinator
         context.coordinator.attach(webView: webView)
 
-        bridge.attach(webView: webView)
-        loadViewerHTML(in: webView)
+        context.coordinator.loadViewerHTML(in: webView)
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        if webView.url == nil {
-            loadViewerHTML(in: webView)
-        }
-    }
-
-    private func loadViewerHTML(in webView: WKWebView) {
-        guard let htmlURL = Bundle.main.url(forResource: htmlResourceName, withExtension: "html") else {
-            webView.loadHTMLString(
-                """
-                <!doctype html>
-                <html><body style="background:#111;color:white;font:17px -apple-system;padding:20px">
-                Viewer resource not found.
-                </body></html>
-                """,
-                baseURL: nil
-            )
-            return
-        }
-
-        webView.loadFileURL(htmlURL, allowingReadAccessTo: htmlURL.deletingLastPathComponent())
-    }
+    func updateUIView(_ webView: WKWebView, context: Context) {}
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "molapp")
     }
 
-    final class Coordinator: NSObject, WKScriptMessageHandler, UIGestureRecognizerDelegate {
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, UIGestureRecognizerDelegate {
         private let bridge: MolStarBridge
+        private let htmlResourceName: String
         private weak var webView: WKWebView?
 
-        init(bridge: MolStarBridge) {
+        init(bridge: MolStarBridge, htmlResourceName: String) {
             self.bridge = bridge
+            self.htmlResourceName = htmlResourceName
         }
 
         func attach(webView: WKWebView) {
             self.webView = webView
+        }
+
+        func loadViewerHTML(in webView: WKWebView) {
+            // Reset readiness here rather than at the call sites: this is the one path every load
+            // and reload routes through, so the flag can never outlive the page it describes.
+            bridge.attach(webView: webView)
+
+            guard let htmlURL = Bundle.main.url(forResource: htmlResourceName, withExtension: "html") else {
+                webView.loadHTMLString(
+                    """
+                    <!doctype html>
+                    <html><body style="background:#111;color:white;font:17px -apple-system;padding:20px">
+                    Viewer resource not found.
+                    </body></html>
+                    """,
+                    baseURL: nil
+                )
+                return
+            }
+
+            webView.loadFileURL(htmlURL, allowingReadAccessTo: htmlURL.deletingLastPathComponent())
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            // The viewer's JS is gone, so it cannot report its own death. Reload from the resource
+            // rather than reload(): after a crash the last URL may be gone, and every command sent
+            // meanwhile would be dropped against a dead page.
+            loadViewerHTML(in: webView)
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

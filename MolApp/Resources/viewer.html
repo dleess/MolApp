@@ -336,9 +336,12 @@
               }
             });
           case 'residueRange': {
-            const rangeParts = ast.value.split('-');
-            const rangeStart = parseInt(rangeParts[0], 10);
-            const rangeEnd = parseInt(rangeParts[1], 10);
+            // Match the bounds explicitly: split('-') mangles negative numbering ("-5-10" splits to
+            // ["","5","10"]), which the Swift side deliberately routes here.
+            const rangeMatch = /^(-?\d+)-(-?\d+)$/.exec(ast.value);
+            if (!rangeMatch) throw new Error('Malformed residue range: ' + ast.value);
+            const rangeStart = parseInt(rangeMatch[1], 10);
+            const rangeEnd = parseInt(rangeMatch[2], 10);
             return atoms({
               residueTest: function (ctx) {
                 const loc = ctx.element;
@@ -1022,13 +1025,15 @@
         },
 
         undo: async function () {
-          if (!window.molapp.undoStack.length) return;
+          // Report the no-op instead of returning: a silent success makes native believe a change
+          // happened and clear UI state the viewer still holds.
+          if (!window.molapp.undoStack.length) throw new Error('Nothing to undo.');
           window.molapp.redoStack.push(snapshotMolApp());
           await restoreMolApp(window.molapp.undoStack.pop());
         },
 
         redo: async function () {
-          if (!window.molapp.redoStack.length) return;
+          if (!window.molapp.redoStack.length) throw new Error('Nothing to redo.');
           window.molapp.undoStack.push(snapshotMolApp());
           await restoreMolApp(window.molapp.redoStack.pop());
         }
@@ -1730,7 +1735,10 @@
             || typeof parsed.visibility !== 'object'
             || Array.isArray(parsed.visibility)
             || !parsed.objects.every(function (o) {
-              return o && typeof o.name === 'string' && (o.type === 'structure' || o.type === 'selection');
+              // colorHex is echoed straight back to native and into hexToMolStarColor, neither of
+              // which re-checks it — this is the only gate on a hand-authored file.
+              return o && typeof o.name === 'string' && (o.type === 'structure' || o.type === 'selection')
+                && (o.colorHex === null || o.colorHex === undefined || /^#[0-9A-Fa-f]{6}$/.test(o.colorHex));
             })
             || !parsed.ligandResns.every(function (name) { return typeof name === 'string'; })
             || !Object.values(parsed.visibility).every(function (value) { return typeof value === 'boolean'; })) {
@@ -1832,6 +1840,9 @@
         window.molapp.prevGranularity = null;
         window.molapp.morphing = false;
         await plugin.managers.animation.stop();
+        // Report the moment the modes actually clear, not when the enclosing command reports. A
+        // command that clears here and then fails (a partial loadState) still leaves native in sync.
+        postCommandResult({ id: 'transient-stop', command: 'transientModesStopped', success: true });
       }
 
       // Split ligands after a load/preset without letting a failure break the caller.
