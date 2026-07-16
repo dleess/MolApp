@@ -4,10 +4,11 @@ struct SelectionExpressionParser {
     let tokens: [String]
     var index = 0
 
+    static let symbols = ["&", "|", "!", "(", ")"]
+
     init(expression: String) {
-        let symbols = ["&", "|", "!", "(", ")"]
         var expr = expression
-        for s in symbols {
+        for s in Self.symbols {
             expr = expr.replacingOccurrences(of: s, with: " \(s) ")
         }
         self.tokens = expr.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
@@ -74,21 +75,15 @@ struct SelectionExpressionParser {
             let value = tokens[index]
             index += 1
             return SelectionAST(kind: .chain, left: nil, right: nil, operand: nil, value: value)
-        } else if token == "residue" {
-            index += 1
-            guard index < tokens.count else { throw ParserError.missingValue("residue") }
-            let value = tokens[index]
-            index += 1
-            return SelectionAST(kind: .residue, left: nil, right: nil, operand: nil, value: value)
         } else if token == "atom" {
             index += 1
             guard index < tokens.count else { throw ParserError.missingValue("atom") }
             let value = tokens[index].uppercased()
             index += 1
             return SelectionAST(kind: .atom, left: nil, right: nil, operand: nil, value: value)
-        } else if token == "res" {
+        } else if token == "res" || token == "residue" {
             index += 1
-            guard index < tokens.count else { throw ParserError.missingValue("res") }
+            guard index < tokens.count else { throw ParserError.missingValue(token) }
             let value = tokens[index]
             index += 1
             // A range needs an interior hyphen ("3-42"); a leading-only hyphen is a negative
@@ -121,7 +116,10 @@ struct SelectionExpressionParser {
 
     static func extractName(from afterSelect: String) -> (name: String, expression: String) {
         let parts = afterSelect.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        if parts.count >= 2 && !selectionKeywords.contains(parts[0].lowercased()) {
+        // A name cannot contain a tokenizer symbol: the tokenizer would split it, so it was never one name.
+        let symbolChars = Set(symbols.joined())
+        if parts.count >= 2 && !selectionKeywords.contains(parts[0].lowercased())
+            && !parts[0].contains(where: { symbolChars.contains($0) }) {
             return (parts[0], parts.dropFirst().joined(separator: " "))
         }
         return ("sele", afterSelect)

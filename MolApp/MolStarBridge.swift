@@ -24,6 +24,9 @@ enum MolStarCommandName: String, Codable {
     case undo
     case redo
     case loadState
+    // Posted by JS whenever it clears measure/morph mode, independent of the command that triggered
+    // it: a command can clear these and then fail, so success is not a reliable signal.
+    case transientModesStopped
 }
 
 struct MolStarCommandResult: Decodable {
@@ -162,10 +165,14 @@ final class MolStarBridge: NSObject, ObservableObject {
     private let decoder = JSONDecoder()
     private var pendingScripts: [String] = []
     private(set) var isViewerReady = false
+    // The viewer never came up at all (fatal init failure). Distinct from !isViewerReady, which is
+    // the normal "still booting" state that pendingScripts exists to cover.
+    private var isViewerFatal = false
 
     func attach(webView: WKWebView) {
         self.webView = webView
         isViewerReady = false
+        isViewerFatal = false
     }
 
     func updateHoverPoint(_ point: CGPoint?) {
@@ -317,6 +324,9 @@ final class MolStarBridge: NSObject, ObservableObject {
     }
 
     private func enqueueScript(_ script: String) {
+        // Queueing against a viewer that never booted grows without bound: loadLocalStructure
+        // embeds the whole structure file in the script, and nothing will ever drain it.
+        guard !isViewerFatal else { return }
         pendingScripts.append(script)
         flushPendingScripts()
     }
@@ -351,7 +361,11 @@ final class MolStarBridge: NSObject, ObservableObject {
         }
 
         if let dict = messageBody as? [String: Any], dict["event"] as? String == "viewerError" {
-            if dict["fatal"] as? Bool == true { isViewerReady = false }
+            if dict["fatal"] as? Bool == true {
+                isViewerReady = false
+                isViewerFatal = true
+                pendingScripts.removeAll()
+            }
             lastErrorMessage = dict["message"] as? String ?? "Mol* viewer error."
             return
         }

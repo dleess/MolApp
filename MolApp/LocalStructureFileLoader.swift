@@ -8,6 +8,8 @@ struct LocalStructureFile {
 }
 
 enum LocalStructureFileLoader {
+    static let maxFileSize = 64 * 1024 * 1024
+
     static let allowedContentTypes: [UTType] = ["pdb", "cif", "mmcif"].compactMap {
         UTType(filenameExtension: $0)
     }
@@ -20,14 +22,21 @@ enum LocalStructureFileLoader {
             }
         }
 
-        let data = try Data(contentsOf: url)
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw LocalStructureFileLoaderError.unreadableText
+        let fileFormat = try format(for: url)
+        // ponytail: the payload is copied ~5x downstream (JSON encode -> String -> script -> WKWebView
+        // IPC), so a large file peaks at several times its size. Cap the input instead of moving the
+        // read off-thread; raise the cap if a real structure gets rejected.
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size <= maxFileSize else {
+            throw LocalStructureFileLoaderError.tooLarge(size)
         }
 
+        let data = try Data(contentsOf: url)
+        // Lossy on purpose: Mol* decodes with a non-fatal TextDecoder, so rejecting a file for one
+        // stray Latin-1 byte in a REMARK would be stricter than the viewer that consumes it.
         return LocalStructureFile(
-            data: text,
-            format: try format(for: url),
+            data: String(decoding: data, as: UTF8.self),
+            format: fileFormat,
             label: url.lastPathComponent
         )
     }
@@ -46,15 +55,17 @@ enum LocalStructureFileLoader {
 
 enum LocalStructureFileLoaderError: LocalizedError, Equatable {
     case unsupportedExtension(String)
-    case unreadableText
+    case tooLarge(Int)
 
     var errorDescription: String? {
         switch self {
         case .unsupportedExtension(let fileExtension):
             let suffix = fileExtension.isEmpty ? "selected file" : ".\(fileExtension)"
             return "Unsupported structure file type: \(suffix)."
-        case .unreadableText:
-            return "Structure file must be UTF-8 text."
+        case .tooLarge(let size):
+            let limit = LocalStructureFileLoader.maxFileSize / (1024 * 1024)
+            let actual = size / (1024 * 1024)
+            return "Structure file is too large: \(actual) MB (limit \(limit) MB)."
         }
     }
 }

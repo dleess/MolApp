@@ -309,6 +309,22 @@ final class MolStarBridgeTests: XCTestCase {
         XCTAssertEqual(ast.value, "3-42")
     }
 
+    // `residue` is an alias for `res`, so it must range-check too: emitting .residue("10-20") makes
+    // the JS side prefix-parse it to residue 10 alone, with no error.
+    func testSelectionExpressionParserHandlesResidueAliasAsRange() throws {
+        var parser = SelectionExpressionParser(expression: "residue 10-20")
+        let ast = try parser.parse()
+        XCTAssertEqual(ast.kind, .residueRange)
+        XCTAssertEqual(ast.value, "10-20")
+    }
+
+    func testSelectionExpressionParserHandlesResidueAliasAsSingleResidue() throws {
+        var parser = SelectionExpressionParser(expression: "residue 42")
+        let ast = try parser.parse()
+        XCTAssertEqual(ast.kind, .residue)
+        XCTAssertEqual(ast.value, "42")
+    }
+
     func testSelectionExpressionParserTreatsNegativeResAsSingleResidue() throws {
         var parser = SelectionExpressionParser(expression: "res -5")
         let ast = try parser.parse()
@@ -373,6 +389,22 @@ final class MolStarBridgeTests: XCTestCase {
         let (name, expr) = SelectionExpressionParser.extractName(from: "chain A")
         XCTAssertEqual(name, "sele")
         XCTAssertEqual(expr, "chain A")
+    }
+
+    // A symbol operator must never be mistaken for a selection name: naming the selection "!" would
+    // drop the negation and silently select the complement of what was asked.
+    func testExtractNameDefaultsToSeleForSymbolOperator() {
+        for expression in ["! chain A", "(chain A | chain B)", "!chain A"] {
+            let (name, expr) = SelectionExpressionParser.extractName(from: expression)
+            XCTAssertEqual(name, "sele", "expression: \(expression)")
+            XCTAssertEqual(expr, expression, "expression: \(expression)")
+        }
+    }
+
+    func testExtractNameStillAcceptsAnExplicitNameBeforeASymbolOperator() {
+        let (name, expr) = SelectionExpressionParser.extractName(from: "mysel ! chain A")
+        XCTAssertEqual(name, "mysel")
+        XCTAssertEqual(expr, "! chain A")
     }
 
     func testObjectRepresentationRawValues() {

@@ -128,7 +128,17 @@ struct MoleculeViewerView: View {
             statusMessage = "\(measureKind?.title ?? "Distance"): \(label)"
         }
         .onReceive(bridge.$lastCommandResult) { result in
-            guard let result, result.success else { return }
+            guard let result else { return }
+            guard result.success else {
+                // In-flight status is set optimistically and only advanced on success, so a rejected
+                // command would otherwise claim "Loading …" forever next to the error banner.
+                // ponytail: in-flight messages are identified by shape; give them their own @State
+                // if that ever gets fragile.
+                if statusMessage.hasSuffix("…") || statusMessage.hasPrefix("Loading") {
+                    statusMessage = "Ready for structure loading"
+                }
+                return
+            }
 
             switch result.command {
             case .loadLocalStructure:
@@ -152,21 +162,18 @@ struct MoleculeViewerView: View {
             case .secondaryStructure:
                 statusMessage = "Secondary structure (helix/sheet/coil)"
             case .resetAll:
-                measureKind = nil
-                isMorphing = false
                 statusMessage = "Reset — everything cleared"
             case .undo:
-                measureKind = nil
-                isMorphing = false
                 statusMessage = "Undid last change"
             case .redo:
-                measureKind = nil
-                isMorphing = false
                 statusMessage = "Redid last change"
             case .loadState:
+                statusMessage = "State loaded"
+            case .transientModesStopped:
+                // JS is the authority on these: it reports the moment it clears them, so a command
+                // that clears and then fails cannot leave the UI claiming a mode the viewer dropped.
                 measureKind = nil
                 isMorphing = false
-                statusMessage = "State loaded"
             default:
                 break
             }
@@ -623,6 +630,12 @@ struct MoleculeViewerView: View {
             guard let url = try result.get().first else { return }
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            // Saved state embeds the structure text, so it is the same size class as a raw file and
+            // needs the same cap — see LocalStructureFileLoader.load.
+            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size <= LocalStructureFileLoader.maxFileSize else {
+                throw LocalStructureFileLoaderError.tooLarge(size)
+            }
             let data = try Data(contentsOf: url)
             guard let json = String(data: data, encoding: .utf8) else {
                 localErrorMessage = "Could not read .molapp file."
