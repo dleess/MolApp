@@ -1735,7 +1735,8 @@
           molstar: plugin.state.getSnapshot(),
           objects: objectsMeta(),
           ligandResns: (window.molapp.ligandResns || []).slice(),
-          visibility: Object.assign({}, window.molapp.visibility)
+          visibility: Object.assign({}, window.molapp.visibility),
+          backgroundColor: window.molapp.backgroundColor || '#0b0f14'
         });
       }
 
@@ -1771,6 +1772,13 @@
         const lib = window.molstar.lib.structure;
         await stopTransientModes();
         await plugin.state.setSnapshot(parsed.molstar);
+        // Restore the saved viewport background (optional field; older files omit it → keep current).
+        if (typeof parsed.backgroundColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(parsed.backgroundColor)) {
+          if (plugin.canvas3d) {
+            plugin.canvas3d.setProps({ renderer: { backgroundColor: hexToMolStarColor(parsed.backgroundColor) } });
+          }
+          window.molapp.backgroundColor = parsed.backgroundColor;
+        }
         // Mol* restores with revertOnError:false, so a PDB structure that fails to re-fetch (offline)
         // leaves setSnapshot resolved with that cell simply absent. Re-derive objects from the LIVE
         // restored state: keep only those whose cell actually came back (no phantom rows), rebuilding
@@ -2121,6 +2129,8 @@
           handleNativePinch,
           representation: null,
           visibility: {},
+          // Tracks the viewport background so Save State can persist it (matches viewportBackgroundColor).
+          backgroundColor: '#0b0f14',
           selection: null,
           morphing: false,
           measureMode: false,
