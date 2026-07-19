@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("DEPRECATION")
     private fun createWebView(): WebView = WebView(this).apply {
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.allowFileAccess = true

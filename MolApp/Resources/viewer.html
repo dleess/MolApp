@@ -22,7 +22,12 @@
     }
 
     #molstar-host {
-      position: relative;
+      /* Fixed + inset:0 sizes the viewport against the initial containing block (the window).
+         The plain height:100% chain (html>body>host) collapses to 0 in the Android System WebView
+         because <body> resolves its percentage height to 0 there, leaving a 411x0 canvas that paints
+         black. iOS WKWebView resolves the chain fine; fixed positioning is correct on both. */
+      position: fixed;
+      inset: 0;
       touch-action: none;
     }
 
@@ -2048,10 +2053,34 @@
         showError(event.reason || 'Unknown initialization error');
       });
 
+      // GPU capability probe. Mol*'s default transparency algorithm (WBOIT) blends into floating-point
+      // color buffers, which requires EXT_float_blend. Some WebGL stacks — notably the Android emulator
+      // WebView and a few low-end software/mobile GPUs — expose EXT_color_buffer_float but NOT
+      // EXT_float_blend, so every WBOIT draw throws GL_INVALID_OPERATION and the viewport paints black
+      // (the structure still loads). Returns whether float blending is safe so init can fall back.
+      function detectWebGLCapabilities() {
+        try {
+          const c = document.createElement('canvas');
+          const gl = c.getContext('webgl2') || c.getContext('webgl');
+          if (!gl) { console.log('[MolApp][GL] no WebGL context'); return { floatBlend: false }; }
+          const isGl2 = (typeof WebGL2RenderingContext !== 'undefined') && (gl instanceof WebGL2RenderingContext);
+          const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+          const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '(masked)';
+          const floatBlend = !!gl.getExtension('EXT_float_blend');
+          console.log('[MolApp][GL] webgl2=' + isGl2 + ' floatBlend=' + floatBlend + ' renderer="' + renderer + '"');
+          return { floatBlend: floatBlend };
+        } catch (e) {
+          console.log('[MolApp][GL] probe failed: ' + (e && e.message));
+          return { floatBlend: false };
+        }
+      }
+
       async function initializeViewer() {
         if (!window.molstar || !window.molstar.Viewer) {
           throw new Error('Bundled Mol* viewer script did not load.');
         }
+
+        const gpuCaps = detectWebGLCapabilities();
 
         const viewer = await window.molstar.Viewer.create(host, {
           layoutIsExpanded: false,
@@ -2095,6 +2124,22 @@
             contextDimmed: false
           }
         };
+        // On GPUs without EXT_float_blend, fall back from WBOIT (float-buffer OIT) to plain blended
+        // transparency (uint8 target) so the scene actually paints. Real mobile/desktop GPUs keep
+        // WBOIT — no visual change there; this only trips on emulators / float-blend-less stacks.
+        if (!gpuCaps.floatBlend && viewer.plugin.canvas3d) {
+          try {
+            // WBOIT and MSAA sample-accumulation both blend into float/fp16 targets. Drop to plain
+            // blended transparency + disable multisampling so every blended draw targets a uint8 buffer.
+            viewer.plugin.canvas3d.setProps({
+              transparency: 'blended',
+              multiSample: { mode: 'off' }
+            });
+            console.log('[MolApp][GL] EXT_float_blend missing → transparency="blended", multiSample=off');
+          } catch (fbErr) {
+            console.error('[MolApp][GL] transparency fallback failed:', fbErr);
+          }
+        }
         bindSelectionUpdates(viewer);
         // A non-looping morph self-completes (fixed duration); Mol* flips isAnimating false but
         // sends native no signal. Reuse the stopMorph result path to reset the morph UI state.
