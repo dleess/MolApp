@@ -1,104 +1,70 @@
-# HANDOFF: Port MolApp to run on Android + iPhone (both render the Mol* viewer)
+# HANDOFF: Push `feat/android-iphone-port`, open a PR, merge to master
 
 **Written:** 2026-07-19 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `feat/android-iphone-port`
 
-> Note: this file previously held the completed "1.0.2 App Store ship" handoff (2026-07-16). That
-> task is done (1.0.2/build 8 was WAITING_FOR_REVIEW; ids also live in memory `molapp-appstore-status.md`).
-> Overwritten with the current task.
-
 ## Goal
-MolApp (thin native shell + Mol* WebGL viewer in a WebView) runs on **both** iPhone and Android,
-with the 3D structure actually **rendering** (not just loading). Acceptance test: `load 1crn` shows
-the crambin ribbon on an iPhone sim AND an Android emulator.
+The user's last instruction, verbatim: **"commit push PR merge"**. Everything is already committed
+(working tree clean). Remaining: **push the branch, open a PR, merge it to `master`.** "Done" = the
+9 commits below are on `master` via a merged PR.
 
 ## Status
-**Done and verified.** Working tree **clean** — everything committed. Branch `feat/android-iphone-port`
-is 4 commits ahead of `master`, **not merged** (merge never requested — confirm before doing it).
+Interrupted right before pushing (the user hit stop, then ran /handoff). Nothing pushed yet.
+- Branch `feat/android-iphone-port`, **working tree clean** (`git status` empty).
+- **9 commits ahead of `master`, 0 pushed** — `git rev-parse --abbrev-ref @{u}` → "no upstream
+  configured for branch 'feat/android-iphone-port'".
+- Remote `origin` = `https://github.com/deepnmr/MolApp.git`.
+- `gh` is installed (`/opt/homebrew/bin/gh`) and **authed as `deepnmr`** (`gh auth status` ✓).
 
-1CRN ribbon renders on:
-- iOS iPhone 17 sim ✅
-- Android emulator `-gpu host` (Apple M4 / Metal via ANGLE) ✅
-- Android emulator `-gpu swiftshader_indirect` (software, the AVD's default) ✅
-
-Ribbon + surface both render; interactive rotation throws 0 GL errors.
+The 9 commits (newest first), all this session's work:
+```
+1d81765 feat: persist viewport background color in saved state
+9166f4c feat(android): bring the full iOS File menu to Android
+5d6ce6c feat: change viewport background color via Display menu (both platforms)
+b000d17 docs: replace completed 1.0.2 handoff with Android/iPhone port render-fix handoff
+d02aa65 feat(android): per-object color picker in Objects panel (Okabe-Ito)
+6c89280 fix: render Mol* viewer in Android WebView (0-height canvas + float-blend)
+0a0783f feat: native Android app (Kotlin + Compose + WebView)
+4ba19a6 feat: iPhone support + cross-platform JS bridge shim
+dab678b docs: Android+iPhone port design spec
+```
 
 ## What worked
-- **Root-caused the Android black screen via live CDP inspection.** Enabled WebView remote
-  debugging, `adb forward tcp:9333 localabstract:webview_devtools_remote_<pid>`, then
-  `Runtime.evaluate` to read the real canvas. It was **411×0** (zero height) — that was the whole
-  black-screen mystery. Structure loaded fine (`boundingSphere` 26.78); nothing to paint on a
-  0-height canvas. **[still applied — remote debugging is on in DEBUG builds]**
-- **CSS fix `#molstar-host { position: fixed; inset: 0 }`** in `MolApp/Resources/viewer.html`.
-  The `html>body>#molstar-host { height:100% }` chain collapses to 0 in the Android System WebView
-  (`document.body` clientHeight = 0 while `document.documentElement` clientHeight = 842). Fixed
-  positioning sizes against the window instead. This is the real fix; affects **all** Android
-  devices. iOS unaffected. **[still applied — committed 6c89280]**
-- **EXT_float_blend fallback** in `viewer.html` init: probe the extension, and when absent
-  `viewer.plugin.canvas3d.setProps({ transparency: 'blended', multiSample: { mode: 'off' } })`.
-  Mol*'s default `transparency:"wboit"` blends into float buffers (needs EXT_float_blend); the
-  emulator WebView lacks it → `GL_INVALID_OPERATION`. **[still applied — committed 6c89280]**
-- Verifying fixes **live via CDP before editing the file** (set `host.style.position='fixed'` +
-  `canvas3d.handleResize()` → canvas became 411×841). Grounded, no guessing.
+- All feature work is done, built, and verified on emulator/sim (see per-commit messages). Both
+  iOS (iPhone 17 sim) and Android (emulator, `-gpu host` and `-gpu swiftshader_indirect`) render and
+  exercise: the port, the WebView black-screen fix, per-object Okabe-Ito color picker, Display ▸
+  Background, the full File menu (Save/Open State, Export PNG/JPEG/GIF/SVG/PDF, Print), and
+  background-in-saved-state. **[all still applied — committed]**
+- Android build: `cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleDebug -q` → BUILD OK.
+- iOS build: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /tmp/molapp_dd build` → BUILD SUCCEEDED.
 
-## What didn't work
-- **Earlier claim "black = emulator GPU EXT_float_blend limitation, works on real device" was WRONG.**
-  Primary cause was the 0-height canvas (a CSS bug hitting all Android devices). Don't repeat that
-  diagnosis. EXT_float_blend was a real but *secondary* issue.
-- **`transparency:'blended'` alone did NOT kill the float-blend errors** — MSAA sample-accumulation
-  also blends into fp16. Needed `multiSample:{mode:'off'}` too. (Both now in the fallback.)
-- **"0 float-blend errors" seen while the canvas was still 0-height was a false negative** — nothing
-  was drawing, so no draws to fail. Only trust GL-error counts once the canvas has non-zero height
-  and a structure is loaded.
-- Switching the emulator to `-gpu host` did **not** by itself expose EXT_float_blend — the Android
-  System WebView's ANGLE doesn't surface it regardless of host GPU. So the fallback is genuinely
-  needed on the emulator; real mobile GPUs (Adreno/Mali/Apple) do expose it.
+## What didn't work / cautions
+- Nothing failed. Not yet attempted: `git push`, `gh pr create`, `gh pr merge`.
+- **`HANDOFF.md` is tracked** and was committed on this branch (commit `b000d17` rewrote it). This file
+  you're reading will change again after this /handoff — decide whether to commit that change before or
+  after the PR. It is NOT part of the product; a stray uncommitted HANDOFF.md edit is fine to leave or
+  commit separately. (Right now, after this write, `git status` will show HANDOFF.md modified.)
+- `master`'s recent history uses squash-merged PRs (e.g. `07e45a8`, `ced1ea7 (#8)`). Match that: the
+  user likely wants a squash merge. Confirm merge style if unsure.
+- The user's default GitHub account per memory is fine here — `gh` is authed as `deepnmr`, which owns
+  the repo. (Play Store account note `lee.donghan@gmail.com` is unrelated to this git push.)
 
-## Key files & commands
-- `MolApp/Resources/viewer.html` — shared web core (single source of truth for iOS + Android). Holds
-  the CSS fix (`#molstar-host`, ~line 24), `detectWebGLCapabilities()` + the float-blend fallback
-  (in `initializeViewer`, ~line 2056 / ~line 2124), and a one-line `[MolApp][GL]` capability log.
-- `android/app/src/main/java/com/donghan/molapp/MainActivity.kt` — `createWebView()` calls
-  `WebView.setWebContentsDebuggingEnabled(true)` under `if (BuildConfig.DEBUG)`; `onConsoleMessage`
-  forwards JS console → Logcat tag `MolApp/JS`.
-- `android/app/build.gradle` — `buildFeatures { buildConfig true }` (needed for `BuildConfig.DEBUG`);
-  `copyWebAssets` task copies `../MolApp/Resources` (viewer.html + molstar) into assets at build time.
-- Android build/run:
-  ```sh
-  cd /Users/donghanlee/work/projects/molapp/android
-  JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleDebug -q
-  ~/Library/Android/sdk/platform-tools/adb install -r app/build/outputs/apk/debug/app-debug.apk
-  ~/Library/Android/sdk/platform-tools/adb shell am start -n com.donghan.molapp/.MainActivity
-  ```
-- iOS build/run:
-  ```sh
-  xcodebuild -project MolApp.xcodeproj -scheme MolApp \
-    -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /tmp/molapp_dd build
-  xcrun simctl install <SIM_UDID> /tmp/molapp_dd/Build/Products/Debug-iphonesimulator/MolApp.app
-  xcrun simctl launch <SIM_UDID> com.donghan.MolApp
-  ```
-  (iOS bundle id: `com.donghan.MolApp`; Android applicationId: `com.donghan.molapp` — different case.)
-- CDP inspection helper (outside repo, session scratchpad — may not persist):
-  `/private/tmp/claude-501/-Users-donghanlee-work-projects-molapp/37ee0721-d689-4c32-9167-d7422de746c6/scratchpad/cdp.py`
-  (`python3 cdp.py <ws_url> "<js expr>"`, no deps, raw-socket WebSocket). `probe.js` there measures
-  canvas size + screenshot brightness. Re-derivable if gone.
-- iOS Simulator taps are in **points, not pixels** (per user CLAUDE.md). Android `adb shell input`
-  taps are in **pixels**; the emulator screenshots came back at display×1.20 scale.
-
-## Next steps
-1. Nothing required to meet the goal — met and verified. Stop unless the user asks for more.
-2. If landing it: open a PR / merge `feat/android-iphone-port` → `master` (commit `6c89280` is the
-   render fix on top of the port). **Confirm first — not yet requested.**
-3. If Play Store shipping comes up: default Google Play account is **lee.donghan@gmail.com** (never
-   kbsi.bionmr, per user CLAUDE.md); needs a signed release bundle. App Store: bump to the NEXT
-   available version (see memory `molapp-appstore-status.md`).
+## Next steps (start here)
+1. Decide whether to commit the post-handoff `HANDOFF.md` change (optional; not product code).
+2. Push with upstream:
+   `git push -u origin feat/android-iphone-port`
+3. Open the PR (base master). Title/body should summarize the 9 commits — Android+iPhone port + render
+   fix + color picker + background menu + File-menu parity + background-in-state:
+   `gh pr create --base master --head feat/android-iphone-port --title "Android + iPhone port" --body "..."`
+4. Merge (squash to match repo history), and delete the branch:
+   `gh pr merge --squash --delete-branch`
+   — If the user wants a merge commit instead of squash, use `--merge`. Confirm first if unsure.
+5. Report the PR URL and merged-commit SHA back to the user.
 
 ## Open questions / risks
-- **No real physical Android device tested** (none available). Confidence rests on the fix being
-  GPU-agnostic + both emulator GPU modes passing. Real hardware also has EXT_float_blend, so it takes
-  the WBOIT path, which is exercised on iOS. Low risk, but **unverified on real Android hardware.**
-- Android features still iOS-only (deliberate, not blockers for the goal): state save/open, image
-  export, print, per-object color swatch row in the Objects panel.
-- Emulator `emulator-5554` is currently running `-gpu swiftshader_indirect`. `adb forward tcp:9333`
-  may still be set. Neither affects the repo.
-- The `[MolApp][GL]` console log fires on every viewer init (one line, also on iOS console). Kept as a
-  deliberate diagnostic; remove if judged noise.
+- **Merge style unconfirmed** — squash (matches history) vs merge commit. Default to squash; ask only
+  if the user cares.
+- No CI status checked — unverified whether the repo has required checks that block merge. If
+  `gh pr merge` reports pending/failed checks, surface them to the user rather than force-merging.
+- Pushing + merging to `master` is outward-facing and hard to reverse. The user explicitly asked for
+  "commit push PR merge", so authorization is clear — but if anything looks off (unexpected diff on the
+  PR, checks failing), stop and report instead of proceeding.
