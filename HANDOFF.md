@@ -1,70 +1,72 @@
-# HANDOFF: Push `feat/android-iphone-port`, open a PR, merge to master
+# HANDOFF: App icon → ubiquitin ribbon on white (done, needs push/PR/merge)
 
-**Written:** 2026-07-19 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `feat/android-iphone-port`
+**Written:** 2026-07-19 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `chore/icon-ubiquitin-white`
 
 ## Goal
-The user's last instruction, verbatim: **"commit push PR merge"**. Everything is already committed
-(working tree clean). Remaining: **push the branch, open a PR, merge it to `master`.** "Done" = the
-9 commits below are on `master` via a merged PR.
+App icon = ubiquitin (1UBQ) ribbon on a **white** background, on **both** iOS and Android.
+"Done" = both platforms show the green ubiquitin ribbon on white; landed on `master`.
 
 ## Status
-Interrupted right before pushing (the user hit stop, then ran /handoff). Nothing pushed yet.
-- Branch `feat/android-iphone-port`, **working tree clean** (`git status` empty).
-- **9 commits ahead of `master`, 0 pushed** — `git rev-parse --abbrev-ref @{u}` → "no upstream
-  configured for branch 'feat/android-iphone-port'".
-- Remote `origin` = `https://github.com/deepnmr/MolApp.git`.
-- `gh` is installed (`/opt/homebrew/bin/gh`) and **authed as `deepnmr`** (`gh auth status` ✓).
-
-The 9 commits (newest first), all this session's work:
-```
-1d81765 feat: persist viewport background color in saved state
-9166f4c feat(android): bring the full iOS File menu to Android
-5d6ce6c feat: change viewport background color via Display menu (both platforms)
-b000d17 docs: replace completed 1.0.2 handoff with Android/iPhone port render-fix handoff
-d02aa65 feat(android): per-object color picker in Objects panel (Okabe-Ito)
-6c89280 fix: render Mol* viewer in Android WebView (0-height canvas + float-blend)
-0a0783f feat: native Android app (Kotlin + Compose + WebView)
-4ba19a6 feat: iPhone support + cross-platform JS bridge shim
-dab678b docs: Android+iPhone port design spec
-```
+**Icon work is complete, committed, and verified on both platforms. Working tree clean.**
+- Branch `chore/icon-ubiquitin-white`, **1 commit ahead of `master`, not pushed** (no upstream).
+  - `8777219 feat: app icon — ubiquitin (1UBQ) ribbon on white, both platforms`
+- Verified: iPhone 17 sim home screen + Android emulator app drawer both show the ribbon on white,
+  correctly masked (rounded square / circle).
+- **Remaining: push + PR + merge** — the user typically says "push PR merge" explicitly (they did for
+  the prior branch). Not yet requested for this branch, so it was not pushed.
 
 ## What worked
-- All feature work is done, built, and verified on emulator/sim (see per-commit messages). Both
-  iOS (iPhone 17 sim) and Android (emulator, `-gpu host` and `-gpu swiftshader_indirect`) render and
-  exercise: the port, the WebView black-screen fix, per-object Okabe-Ito color picker, Display ▸
-  Background, the full File menu (Save/Open State, Export PNG/JPEG/GIF/SVG/PDF, Print), and
-  background-in-saved-state. **[all still applied — committed]**
-- Android build: `cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleDebug -q` → BUILD OK.
-- iOS build: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /tmp/molapp_dd build` → BUILD SUCCEEDED.
+- **Rendered the icon with the app's own Mol* engine** (authentic, matches the app):
+  1. Android emulator (already running), app installed: loaded 1UBQ, set background White (Display ▸
+     Background ▸ White).
+  2. WebView remote debugging is ON in DEBUG builds. Drove Mol* via CDP to render a **square 2000×2000**
+     screenshot: `plugin.helpers.viewportScreenshot.behaviors.values.next({...resolution:{name:'custom',
+     params:{width:2000,height:2000}}})` then `getImageDataUri()`. (Setting `vs.values = ...` directly
+     does NOT work — `values` is a read-only getter backed by `behaviors.values`.)
+  3. Post-processed with PIL: autocrop the ribbon off white, recenter on a white square, resize.
+- **All icon PNGs regenerated from two square masters** (RGB, no alpha — App Store safe). **[still applied]**
+- **Android adaptive launcher icon added** (there was none before — Android showed the default icon).
 
 ## What didn't work / cautions
-- Nothing failed. Not yet attempted: `git push`, `gh pr create`, `gh pr merge`.
-- **`HANDOFF.md` is tracked** and was committed on this branch (commit `b000d17` rewrote it). This file
-  you're reading will change again after this /handoff — decide whether to commit that change before or
-  after the PR. It is NOT part of the product; a stray uncommitted HANDOFF.md edit is fine to leave or
-  commit separately. (Right now, after this write, `git status` will show HANDOFF.md modified.)
-- `master`'s recent history uses squash-merged PRs (e.g. `07e45a8`, `ced1ea7 (#8)`). Match that: the
-  user likely wants a squash merge. Confirm merge style if unsure.
-- The user's default GitHub account per memory is fine here — `gh` is authed as `deepnmr`, which owns
-  the repo. (Play Store account note `lee.donghan@gmail.com` is unrelated to this git push.)
+- Emulator Export ▸ PNG gives only **411×841** (canvas size) — too low for a crisp 1024 icon. Use the
+  CDP custom-resolution screenshot instead (above). **[dead end, don't reuse for icons]**
+- CDP call **timed out at the default 10s socket timeout** rendering 2000² on the software (swiftshader)
+  emulator GPU. Fix already applied to the helper: `s.settimeout(90)` after connect. **[still applied]**
+- The square screenshot keeps the **portrait camera framing**, so the molecule renders small/off-center
+  in the square (bbox was ~736×786 inside 2000²). That's why the PIL autocrop+recenter step is needed —
+  don't use the raw screenshot as the icon.
 
-## Next steps (start here)
-1. Decide whether to commit the post-handoff `HANDOFF.md` change (optional; not product code).
-2. Push with upstream:
-   `git push -u origin feat/android-iphone-port`
-3. Open the PR (base master). Title/body should summarize the 9 commits — Android+iPhone port + render
-   fix + color picker + background menu + File-menu parity + background-in-state:
-   `gh pr create --base master --head feat/android-iphone-port --title "Android + iPhone port" --body "..."`
-4. Merge (squash to match repo history), and delete the branch:
-   `gh pr merge --squash --delete-branch`
-   — If the user wants a merge commit instead of squash, use `--merge`. Confirm first if unsure.
-5. Report the PR URL and merged-commit SHA back to the user.
+## Key files & commands
+- `MolApp/Assets.xcassets/AppIcon.appiconset/` — 17 iOS PNGs (filenames unchanged; `Contents.json`
+  untouched). Regenerated from a 1024 master at 0.82 content.
+- `android/app/src/main/res/mipmap-*/` — `ic_launcher.png`, `ic_launcher_round.png`,
+  `ic_launcher_foreground.png` at 5 densities; `mipmap-anydpi-v26/ic_launcher.xml` +
+  `ic_launcher_round.xml` (adaptive: `@android:color/white` bg + `@mipmap/ic_launcher_foreground` fg).
+- `android/app/src/main/AndroidManifest.xml` — added `android:icon="@mipmap/ic_launcher"` +
+  `android:roundIcon="@mipmap/ic_launcher_round"` on `<application>`. **[still applied]**
+- Scratchpad (outside repo; regenerate if gone) at
+  `/private/tmp/claude-501/-Users-donghanlee-work-projects-molapp/37ee0721-d689-4c32-9167-d7422de746c6/scratchpad/`:
+  `cdp.py` (raw-socket CDP client, patched: 90s timeout + optional 3rd arg = outfile for full result),
+  `shot.js` (2000² screenshot JS), `make_icon.py` (autocrop/recenter), `gen_all.py` (all sizes),
+  `icon-1024.png` / `icon-fg-1024.png` (the two masters), `ubq_2000.png` (raw render).
+- Regenerate all icons: `python3 gen_all.py` (paths are hardcoded to this repo).
+- Builds: Android `cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleDebug -q`;
+  iOS `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /tmp/molapp_dd build`.
+- iOS sim UDID for verification: `AA2D8B99-7BC2-4947-B585-16B1D90DDD70` (also in `/tmp/molapp_sim_id.txt`).
+  Icon cache is sticky — `xcrun simctl uninstall` then `install` to force a refresh.
+
+## Next steps
+1. If the user says push/PR/merge (like last time), from this branch:
+   - `git push -u origin chore/icon-ubiquitin-white`
+   - `gh pr create --base master --head chore/icon-ubiquitin-white --title "App icon: ubiquitin ribbon on white" --body "..."`
+   - `gh pr merge --squash --delete-branch` (repo history is squash-merged; `gh` is authed as `deepnmr`,
+     remote `origin` = `https://github.com/deepnmr/MolApp.git`).
+2. This `HANDOFF.md` will be modified again by this write — decide whether to commit it (it's a scratch
+   doc, not product code; `HANDOFF.md` is tracked and was committed on the prior branch).
 
 ## Open questions / risks
-- **Merge style unconfirmed** — squash (matches history) vs merge commit. Default to squash; ask only
-  if the user cares.
-- No CI status checked — unverified whether the repo has required checks that block merge. If
-  `gh pr merge` reports pending/failed checks, surface them to the user rather than force-merging.
-- Pushing + merging to `master` is outward-facing and hard to reverse. The user explicitly asked for
-  "commit push PR merge", so authorization is clear — but if anything looks off (unexpected diff on the
-  PR, checks failing), stop and report instead of proceeding.
+- **Not pushed/merged** — do that only when the user asks.
+- **App Store / Play Store icon submission is a separate step** (not done). If they want to ship: bump to
+  the NEXT available App Store version (memory `molapp-appstore-status.md`); Play uses the adaptive icon
+  automatically. Default Play account is `lee.donghan@gmail.com` (memory), never kbsi.bionmr.
+- Real-device icon rendering unverified (only sim + emulator). Low risk — standard icon assets.
