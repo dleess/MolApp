@@ -596,7 +596,19 @@ struct MoleculeViewerView: View {
             if components.count >= 3 {
                 let colorArg = components[1]
                 let objName = rawComponents.dropFirst(2).joined(separator: " ")
-                let colorHex: String? = colorArg == "default" ? nil : colorNameToHex(colorArg)
+                // Reject an unknown color name instead of silently painting it white (colorNameToHex
+                // falls back to #FFFFFF): a typo like "gren" must report the usage, not recolor white.
+                let colorHex: String?
+                if colorArg == "default" {
+                    colorHex = nil
+                } else if colorArg.hasPrefix("#") {
+                    colorHex = colorArg
+                } else if let named = Self.namedColors[colorArg] {
+                    colorHex = named
+                } else {
+                    localErrorMessage = "Usage: color [red|green|blue|yellow|white|cyan|magenta|orange|#RRGGBB|default] [name]"
+                    return
+                }
                 bridge.setObjectColor(name: objName, colorHex: colorHex)
             } else {
                 localErrorMessage = "Usage: color [red|green|blue|yellow|white|cyan|magenta|orange|#RRGGBB|default] [name]"
