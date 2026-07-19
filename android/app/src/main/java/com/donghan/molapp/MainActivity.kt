@@ -195,6 +195,13 @@ private fun MenuBar(controller: ViewerController, bridge: MolStarBridge, onOpenS
                 DropdownMenuItem(text = { Text("${if (visible) "Hide" else "Show"} ${feature.title}") },
                     onClick = { dismiss(); controller.toggleVisibility(feature) })
             }
+            SectionLabel("Background")
+            for (preset in backgroundPresets) {
+                DropdownMenuItem(text = { Text(preset.title) }, onClick = {
+                    dismiss(); bridge.clearError(); bridge.setBackgroundColor(preset.hex)
+                    bridge.updateStatus("Background: ${preset.title}")
+                })
+            }
         }
         TopMenu("Calculation") { dismiss ->
             DropdownMenuItem(text = { Text("Surface Potential") }, enabled = hasStructures,
@@ -217,7 +224,7 @@ private fun MenuBar(controller: ViewerController, bridge: MolStarBridge, onOpenS
         }
         TopMenu("Help") { dismiss ->
             DropdownMenuItem(text = { Text("Quick Help") },
-                onClick = { dismiss(); bridge.updateStatus("Open a PDB/mmCIF file or enter a PDB ID") })
+                onClick = { dismiss(); bridge.updateStatus("Load a PDB ID or open a file · set the viewport background via Display ▸ Background") })
         }
     }
 }

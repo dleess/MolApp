@@ -374,6 +374,18 @@ struct MoleculeViewerView: View {
                         }
                     }
                 }
+
+                Section("Background") {
+                    ForEach(Self.backgroundPresets) { preset in
+                        Button {
+                            localErrorMessage = nil
+                            bridge.setBackgroundColor(colorHex: preset.hex)
+                            statusMessage = "Background: \(preset.title)"
+                        } label: {
+                            Label(preset.title, systemImage: "square.fill")
+                        }
+                    }
+                }
             }
 
             Menu("Calculation") {
@@ -583,6 +595,17 @@ struct MoleculeViewerView: View {
             } else {
                 localErrorMessage = "Usage: color [red|green|blue|yellow|white|cyan|magenta|orange|#RRGGBB|default] [name]"
             }
+        case "background", "bg":
+            let arg = components.count >= 2 ? components[1] : ""
+            let hex: String? = arg.hasPrefix("#")
+                ? arg.uppercased()
+                : Self.backgroundPresets.first { $0.title.lowercased() == arg }?.hex
+            if let hex, hex.range(of: "^#[0-9A-Fa-f]{6}$", options: .regularExpression) != nil {
+                bridge.setBackgroundColor(colorHex: hex)
+                statusMessage = "Background set"
+            } else {
+                localErrorMessage = "Usage: background [dark|black|gray|light|white|#RRGGBB]"
+            }
         case "clear":
             bridge.clearSelection()
         case "focus":
@@ -764,6 +787,21 @@ struct MoleculeViewerView: View {
         if name.hasPrefix("#") { return name }
         return Self.namedColors[name] ?? "#FFFFFF"
     }
+
+    // Viewport background presets (dark → light). Shared by the Display ▸ Background menu and the
+    // `background` command so both offer the same names.
+    struct BackgroundPreset: Identifiable {
+        let title: String
+        let hex: String
+        var id: String { hex }
+    }
+    static let backgroundPresets: [BackgroundPreset] = [
+        .init(title: "Dark", hex: "#0B0F14"),
+        .init(title: "Black", hex: "#000000"),
+        .init(title: "Gray", hex: "#4D4D4D"),
+        .init(title: "Light", hex: "#D9D9D9"),
+        .init(title: "White", hex: "#FFFFFF"),
+    ]
 
     private var objectsPanel: some View {
         VStack(alignment: .leading, spacing: 6) {

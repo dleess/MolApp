@@ -155,6 +155,16 @@ class ViewerController(val bridge: MolStarBridge) {
                 bridge.setObjectColor(objName, colorHex)
             } else bridge.updateError("Usage: color [red|green|blue|yellow|white|cyan|magenta|orange|#RRGGBB|default] [name]")
 
+            "background", "bg" -> {
+                val arg = if (components.size >= 2) components[1] else ""
+                val hex = if (arg.startsWith("#")) arg.uppercase()
+                    else backgroundPresets.firstOrNull { it.title.lowercase() == arg }?.hex
+                if (hex != null && Regex("^#[0-9A-Fa-f]{6}$").matches(hex)) {
+                    bridge.setBackgroundColor(hex)
+                    bridge.updateStatus("Background set")
+                } else bridge.updateError("Usage: background [dark|black|gray|light|white|#RRGGBB]")
+            }
+
             "clear" -> bridge.clearSelection()
             "focus" -> bridge.focusSelection()
             "surfpot", "potential" -> surfacePotential()

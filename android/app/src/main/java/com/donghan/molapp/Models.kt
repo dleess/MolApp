@@ -78,6 +78,18 @@ fun colorNameToHex(name: String): String {
     return namedColors[name] ?: "#FFFFFF"
 }
 
+// Viewport background presets (dark → light), shared by the Display ▸ Background menu and the
+// `background` command. Matches the iOS BackgroundPreset list.
+data class BackgroundPreset(val title: String, val hex: String)
+
+val backgroundPresets: List<BackgroundPreset> = listOf(
+    BackgroundPreset("Dark", "#0B0F14"),
+    BackgroundPreset("Black", "#000000"),
+    BackgroundPreset("Gray", "#4D4D4D"),
+    BackgroundPreset("Light", "#D9D9D9"),
+    BackgroundPreset("White", "#FFFFFF"),
+)
+
 /** Selection AST node. Serializes to the same JSON shape the viewer's queryFromAST consumes. */
 data class SelAst(
     val kind: String,

@@ -102,6 +102,9 @@ class MolStarBridge {
         send("setObjectColor", JSONObject().apply { put("name", name); put("colorHex", colorHex ?: JSONObject.NULL) })
     }
 
+    fun setBackgroundColor(colorHex: String) =
+        send("setBackgroundColor", JSONObject().put("colorHex", colorHex))
+
     fun drawSurfacePotential(targets: List<String>) =
         send("surfacePotential", JSONObject().put("targets", targets.toJsonArray()))
 

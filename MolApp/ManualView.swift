@@ -53,6 +53,14 @@ struct ManualView: View {
             ]
         ),
         Section(
+            title: "Background",
+            icon: "paintpalette",
+            body: "Display ▸ Background sets the viewport background color — Dark, Black, Gray, Light or White. A light background is handy for presentation slides or printing.",
+            commands: [
+                Command(syntax: "background white", detail: "Set the viewport background (dark / black / gray / light / white, or #RRGGBB)")
+            ]
+        ),
+        Section(
             title: "Selections",
             icon: "lasso",
             body: "Build a named selection from an expression. Combine terms with & (and), | (or), ! (not) and parentheses. Tap an atom in the viewport to select it; double-tap to focus.",

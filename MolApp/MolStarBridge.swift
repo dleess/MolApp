@@ -13,6 +13,7 @@ enum MolStarCommandName: String, Codable {
     case setObjectVisibility
     case setObjectRepresentation
     case setObjectColor
+    case setBackgroundColor
     case surfacePotential
     case startMorph
     case stopMorph
@@ -226,6 +227,10 @@ final class MolStarBridge: NSObject, ObservableObject {
 
     func setObjectColor(name: String, colorHex: String?) {
         send(.setObjectColor, payload: ObjectColorPayload(name: name, colorHex: colorHex))
+    }
+
+    func setBackgroundColor(colorHex: String) {
+        send(.setBackgroundColor, payload: BackgroundColorPayload(colorHex: colorHex))
     }
 
     func drawSurfacePotential(targets: [String] = []) {
@@ -508,6 +513,10 @@ private struct ObjectRepresentationPayload: Encodable {
 private struct ObjectColorPayload: Encodable {
     let name: String
     let colorHex: String?
+}
+
+private struct BackgroundColorPayload: Encodable {
+    let colorHex: String
 }
 
 private struct MorphPayload: Encodable {

@@ -833,6 +833,18 @@
           postObjectsReplaced(objectsMeta(), window.molapp.visibility);
         },
 
+        setBackgroundColor: async function (payload) {
+          const colorHex = payload.colorHex;
+          if (!/^#[0-9A-Fa-f]{6}$/.test(colorHex || '')) {
+            throw new Error('Background color must use #RRGGBB format.');
+          }
+          const canvas3d = window.molapp.viewer.plugin.canvas3d;
+          if (!canvas3d) throw new Error('Viewer is not ready.');
+          canvas3d.setProps({ renderer: { backgroundColor: hexToMolStarColor(colorHex) } });
+          window.molapp.backgroundColor = colorHex;
+          return { colorHex: colorHex };
+        },
+
         surfacePotential: async function (payload) {
           const plugin = window.molapp.viewer.plugin;
           const structures = targetStructures(payload);
