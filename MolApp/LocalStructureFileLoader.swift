@@ -32,6 +32,11 @@ enum LocalStructureFileLoader {
         }
 
         let data = try Data(contentsOf: url)
+        // fileSizeKey is nil for some providers → the pre-check passes with size 0. Re-check the bytes
+        // actually read, before they get amplified ~5x through String → JSON → script → WKWebView IPC.
+        guard data.count <= maxFileSize else {
+            throw LocalStructureFileLoaderError.tooLarge(data.count)
+        }
         // Lossy on purpose: Mol* decodes with a non-fatal TextDecoder, so rejecting a file for one
         // stray Latin-1 byte in a REMARK would be stricter than the viewer that consumes it.
         return LocalStructureFile(

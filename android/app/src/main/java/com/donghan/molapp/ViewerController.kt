@@ -151,7 +151,14 @@ class ViewerController(val bridge: MolStarBridge) {
             "color" -> if (components.size >= 3) {
                 val colorArg = components[1]
                 val objName = rawComponents.drop(2).joinToString(" ")
-                val colorHex = if (colorArg == "default") null else colorNameToHex(colorArg)
+                // Reject an unknown color name instead of silently painting it white — a typo like
+                // "gren" must report the usage, not recolor the object indistinguishably from "white".
+                val colorHex = when {
+                    colorArg == "default" -> null
+                    colorArg.startsWith("#") -> colorArg
+                    namedColors.containsKey(colorArg) -> namedColors[colorArg]
+                    else -> { bridge.updateError("Usage: color [red|green|blue|yellow|white|cyan|magenta|orange|#RRGGBB|default] [name]"); return }
+                }
                 bridge.setObjectColor(objName, colorHex)
             } else bridge.updateError("Usage: color [red|green|blue|yellow|white|cyan|magenta|orange|#RRGGBB|default] [name]")
 

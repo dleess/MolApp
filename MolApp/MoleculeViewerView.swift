@@ -138,6 +138,12 @@ struct MoleculeViewerView: View {
                 if statusMessage.hasSuffix("…") || statusMessage.hasPrefix("Loading") {
                     statusMessage = "Ready for structure loading"
                 }
+                // measureKind is set optimistically in toggleMeasure; if JS never entered measure
+                // mode (e.g. the command failed before the viewer was ready), clear it so the
+                // "tap N atoms" banner doesn't stick with taps doing nothing.
+                if result.command == .setMeasureMode {
+                    measureKind = nil
+                }
                 return
             }
 
@@ -676,6 +682,11 @@ struct MoleculeViewerView: View {
                 throw LocalStructureFileLoaderError.tooLarge(size)
             }
             let data = try Data(contentsOf: url)
+            // fileSizeKey is nil for some providers → the pre-check passes with size 0; re-check the
+            // bytes actually read (see LocalStructureFileLoader.load).
+            guard data.count <= LocalStructureFileLoader.maxFileSize else {
+                throw LocalStructureFileLoaderError.tooLarge(data.count)
+            }
             guard let json = String(data: data, encoding: .utf8) else {
                 localErrorMessage = "Could not read .molapp file."
                 return

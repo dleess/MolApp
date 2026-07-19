@@ -270,6 +270,9 @@ class MolStarBridge {
         val label = if (r.isNull("label")) null else r.optString("label", null)
         if (!success) {
             if (status.endsWith("…") || status.startsWith("Loading")) status = "Ready for structure loading"
+            // measureKind is set optimistically in setMeasureMode; clear it if the command failed so
+            // the measure banner doesn't stick while JS never entered measure mode.
+            if (command == "setMeasureMode") measureKind = null
             error = if (r.isNull("error")) null else r.optString("error", null)
             return
         }
