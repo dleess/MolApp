@@ -78,6 +78,16 @@ fun colorNameToHex(name: String): String {
     return namedColors[name] ?: "#FFFFFF"
 }
 
+// Image export formats offered by File ▸ Export Display, matching the iOS ExportFormat enum. The
+// viewer hands back a PNG data URL; each format re-wraps that raster natively (see MainActivity).
+enum class ExportFormat(val title: String, val ext: String, val mime: String) {
+    PNG("PNG", "png", "image/png"),
+    JPEG("JPEG", "jpg", "image/jpeg"),
+    GIF("GIF", "gif", "image/gif"),
+    SVG("SVG", "svg", "image/svg+xml"),
+    PDF("PDF", "pdf", "application/pdf"),
+}
+
 // Viewport background presets (dark → light), shared by the Display ▸ Background menu and the
 // `background` command. Matches the iOS BackgroundPreset list.
 data class BackgroundPreset(val title: String, val hex: String)

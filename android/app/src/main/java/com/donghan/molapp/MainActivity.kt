@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -60,6 +61,9 @@ class MainActivity : ComponentActivity() {
     private val bridge = MolStarBridge()
     private lateinit var controller: ViewerController
     private lateinit var openDoc: ActivityResultLauncher<Array<String>>
+    private lateinit var openStateDoc: ActivityResultLauncher<Array<String>>
+    private lateinit var createDoc: ActivityResultLauncher<String>
+    private var pendingSaveBytes: ByteArray? = null
     private var webView: WebView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,13 +73,31 @@ class MainActivity : ComponentActivity() {
         openDoc = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             uri?.let { loadLocalStructure(it) }
         }
+        openStateDoc = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            uri?.let { openState(it) }
+        }
+        // One CreateDocument launcher for every save/export; the pending bytes + suggested filename
+        // extension (set right before launch) determine what gets written and how apps open it.
+        createDoc = registerForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
+            val bytes = pendingSaveBytes
+            pendingSaveBytes = null
+            if (uri != null && bytes != null) writeToUri(uri, bytes)
+        }
 
         val wv = createWebView()
         webView = wv
 
+        val fileActions = FileActions(
+            onOpenStructure = { openDoc.launch(arrayOf("*/*")) },
+            onSaveState = { saveState() },
+            onOpenState = { openStateDoc.launch(arrayOf("*/*")) },
+            onExport = { exportImage(it) },
+            onPrint = { printDisplay() },
+        )
+
         setContent {
             MaterialTheme(colorScheme = androidx.compose.material3.darkColorScheme()) {
-                ViewerScreen(controller, wv, onOpenStructure = { openDoc.launch(arrayOf("*/*")) })
+                ViewerScreen(controller, wv, fileActions)
             }
         }
     }
@@ -121,6 +143,113 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ---- File ▸ Save / Open State (.molapp) -----------------------------------------------------
+
+    private fun saveState() {
+        if (bridge.objects.isEmpty()) { bridge.updateError("Nothing to save yet."); return }
+        bridge.clearError()
+        bridge.updateStatus("Capturing state…")
+        bridge.requestSerializedState { json ->
+            if (json.isNullOrEmpty()) { bridge.updateError("Could not capture current state."); return@requestSerializedState }
+            pendingSaveBytes = json.toByteArray(Charsets.UTF_8)
+            bridge.updateStatus("Choose where to save…")
+            runCatching { createDoc.launch("molecule.molapp") }
+                .onFailure { bridge.updateError("Could not open the save dialog.") }
+        }
+    }
+
+    private fun openState(uri: Uri) {
+        try {
+            val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            if (text.isNullOrEmpty()) { bridge.updateError("Could not read .molapp file."); return }
+            if (text.toByteArray().size > 64 * 1024 * 1024) { bridge.updateError("State file is too large."); return }
+            bridge.clearError()
+            bridge.updateStatus("Loading state…")
+            bridge.loadState(text)
+        } catch (e: Exception) {
+            bridge.updateError(e.message ?: "Could not open state file.")
+        }
+    }
+
+    // ---- File ▸ Export Display / Print ----------------------------------------------------------
+
+    private fun exportImage(format: ExportFormat) {
+        if (bridge.objects.isEmpty()) { bridge.updateError("Nothing to export yet."); return }
+        bridge.clearError()
+        bridge.updateStatus("Rendering ${format.title}…")
+        bridge.requestImageDataUrl { dataUrl ->
+            val bmp = dataUrl?.let(::bitmapFromDataUrl)
+            if (bmp == null) { bridge.updateError("Could not capture the display."); return@requestImageDataUrl }
+            val bytes = runCatching { encodeImage(bmp, format) }.getOrNull()
+            if (bytes == null) { bridge.updateError("Could not encode ${format.title}."); return@requestImageDataUrl }
+            pendingSaveBytes = bytes
+            bridge.updateStatus("Choose where to save…")
+            runCatching { createDoc.launch("molecule.${format.ext}") }
+                .onFailure { bridge.updateError("Could not open the save dialog.") }
+        }
+    }
+
+    private fun printDisplay() {
+        if (bridge.objects.isEmpty()) { bridge.updateError("Nothing to print yet."); return }
+        bridge.clearError()
+        bridge.updateStatus("Rendering for print…")
+        bridge.requestImageDataUrl { dataUrl ->
+            val bmp = dataUrl?.let(::bitmapFromDataUrl)
+            if (bmp == null) { bridge.updateError("Could not capture the display."); return@requestImageDataUrl }
+            runCatching { androidx.print.PrintHelper(this).apply { scaleMode = androidx.print.PrintHelper.SCALE_MODE_FIT }.printBitmap("MolApp", bmp) }
+                .onFailure { bridge.updateError("Printing is unavailable on this device.") }
+        }
+    }
+
+    private fun writeToUri(uri: Uri, bytes: ByteArray) {
+        try {
+            contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+            bridge.updateStatus("Saved")
+        } catch (e: Exception) {
+            bridge.updateError(e.message ?: "Could not write the file.")
+        }
+    }
+
+    // Mol* hands back a `data:image/png;base64,...` URL; decode it, then re-wrap natively per format.
+    private fun bitmapFromDataUrl(dataUrl: String): android.graphics.Bitmap? {
+        val comma = dataUrl.indexOf(',')
+        if (comma < 0) return null
+        return runCatching {
+            val bytes = android.util.Base64.decode(dataUrl.substring(comma + 1), android.util.Base64.DEFAULT)
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }.getOrNull()
+    }
+
+    private fun encodeImage(bmp: android.graphics.Bitmap, format: ExportFormat): ByteArray = when (format) {
+        ExportFormat.PNG -> java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        ExportFormat.JPEG -> java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, it) }.toByteArray()
+        ExportFormat.GIF -> GifEncoder.encode(bmp)
+        ExportFormat.SVG -> svgWrap(bmp)
+        ExportFormat.PDF -> pdfFromBitmap(bmp)
+    }
+
+    // A WebGL viewport is raster, so wrap the PNG in an SVG <image> — opens anywhere an .svg is
+    // expected. ponytail: known ceiling, raster inside vector (mirrors iOS svgData).
+    private fun svgWrap(bmp: android.graphics.Bitmap): ByteArray {
+        val png = java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        val b64 = android.util.Base64.encodeToString(png, android.util.Base64.NO_WRAP)
+        val svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" " +
+            "width=\"${bmp.width}\" height=\"${bmp.height}\" viewBox=\"0 0 ${bmp.width} ${bmp.height}\">" +
+            "<image width=\"${bmp.width}\" height=\"${bmp.height}\" xlink:href=\"data:image/png;base64,$b64\"/></svg>"
+        return svg.toByteArray(Charsets.UTF_8)
+    }
+
+    private fun pdfFromBitmap(bmp: android.graphics.Bitmap): ByteArray {
+        val doc = android.graphics.pdf.PdfDocument()
+        val page = doc.startPage(android.graphics.pdf.PdfDocument.PageInfo.Builder(bmp.width, bmp.height, 1).create())
+        page.canvas.drawBitmap(bmp, 0f, 0f, null)
+        doc.finishPage(page)
+        val out = java.io.ByteArrayOutputStream()
+        doc.writeTo(out)
+        doc.close()
+        return out.toByteArray()
+    }
+
     private fun queryDisplayName(uri: Uri): String? =
         contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
@@ -138,15 +267,24 @@ class MainActivity : ComponentActivity() {
 private val PanelBg = Color(0xFF111114).copy(alpha = 0.82f)
 private val BarBg = Color.Black.copy(alpha = 0.68f)
 
+// File-menu actions that need Activity-level plumbing (SAF pickers, print). Mirrors the iOS File menu.
+class FileActions(
+    val onOpenStructure: () -> Unit,
+    val onSaveState: () -> Unit,
+    val onOpenState: () -> Unit,
+    val onExport: (ExportFormat) -> Unit,
+    val onPrint: () -> Unit,
+)
+
 @Composable
-private fun ViewerScreen(controller: ViewerController, webView: WebView, onOpenStructure: () -> Unit) {
+private fun ViewerScreen(controller: ViewerController, webView: WebView, actions: FileActions) {
     val bridge = controller.bridge
     Box(Modifier.fillMaxSize().background(Color(0xFF0B0B0F))) {
         AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
 
         Column(Modifier.fillMaxSize().systemBarsPadding()) {
-            MenuBar(controller, bridge, onOpenStructure)
-            InfoCard(controller, bridge, onOpenStructure)
+            MenuBar(controller, bridge, actions)
+            InfoCard(controller, bridge, actions.onOpenStructure)
             Spacer(Modifier.weight(1f))
             bridge.measureKind?.let {
                 Text(
@@ -164,8 +302,9 @@ private fun ViewerScreen(controller: ViewerController, webView: WebView, onOpenS
 }
 
 @Composable
-private fun MenuBar(controller: ViewerController, bridge: MolStarBridge, onOpenStructure: () -> Unit) {
+private fun MenuBar(controller: ViewerController, bridge: MolStarBridge, actions: FileActions) {
     val hasStructures = bridge.visibleStructureNames.isNotEmpty()
+    val hasObjects = bridge.objects.isNotEmpty()
     Row(
         Modifier.fillMaxWidth().background(BarBg)
             .horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
@@ -173,7 +312,22 @@ private fun MenuBar(controller: ViewerController, bridge: MolStarBridge, onOpenS
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TopMenu("File") { dismiss ->
-            DropdownMenuItem(text = { Text("Open Structure") }, onClick = { dismiss(); onOpenStructure() })
+            DropdownMenuItem(text = { Text("Open Structure") }, onClick = { dismiss(); actions.onOpenStructure() })
+            DropdownMenuItem(text = { Text("Load PDB ID") }, enabled = controller.pdbText.isNotBlank(),
+                onClick = { dismiss(); controller.loadPdb() })
+            HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+            DropdownMenuItem(text = { Text("Save State (.molapp)") }, enabled = hasObjects,
+                onClick = { dismiss(); actions.onSaveState() })
+            DropdownMenuItem(text = { Text("Open State (.molapp)") }, onClick = { dismiss(); actions.onOpenState() })
+            HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+            SectionLabel("Export Display")
+            for (format in ExportFormat.entries) {
+                DropdownMenuItem(text = { Text(format.title) }, enabled = hasObjects,
+                    onClick = { dismiss(); actions.onExport(format) })
+            }
+            DropdownMenuItem(text = { Text("Print") }, enabled = hasObjects,
+                onClick = { dismiss(); actions.onPrint() })
+            HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
             DropdownMenuItem(text = { Text("Reset All") }, onClick = {
                 dismiss(); bridge.clearError(); bridge.resetAll(); bridge.updateStatus("Resetting…")
             })

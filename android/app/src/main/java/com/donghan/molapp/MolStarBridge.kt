@@ -130,6 +130,44 @@ class MolStarBridge {
     fun resetAll() = send("resetAll", JSONObject())
     fun undo() = send("undo", JSONObject())
     fun redo() = send("redo", JSONObject())
+    fun loadState(json: String) = send("loadState", JSONObject().put("json", json))
+
+    // ---- Async round-trips ----------------------------------------------------------------------
+    // serializeMolAppState() and captureImageDataURL() are async JS functions that return a value
+    // (state JSON / PNG data URL). Android's evaluateJavascript can't await a Promise, so resolve it
+    // in JS and hand the result back through the MolAppAndroid @JavascriptInterface (onAsyncResult).
+
+    private var pendingStateCb: ((String?) -> Unit)? = null
+    private var pendingImageCb: ((String?) -> Unit)? = null
+
+    fun requestSerializedState(cb: (String?) -> Unit) {
+        pendingStateCb = cb
+        evalAsync("state", "window.molapp.serializeMolAppState()")
+    }
+
+    fun requestImageDataUrl(cb: (String?) -> Unit) {
+        pendingImageCb = cb
+        evalAsync("image", "window.molapp.captureImageDataURL()")
+    }
+
+    private fun evalAsync(kind: String, expr: String) {
+        enqueue(
+            "Promise.resolve($expr).then(" +
+                "function(r){window.MolAppAndroid.onAsyncResult('$kind', r == null ? '' : String(r));}," +
+                "function(e){window.MolAppAndroid.onAsyncResult('$kind', '');});void 0;"
+        )
+    }
+
+    @JavascriptInterface
+    fun onAsyncResult(kind: String, value: String) {
+        val result = value.ifEmpty { null }
+        main.post {
+            when (kind) {
+                "state" -> { pendingStateCb?.invoke(result); pendingStateCb = null }
+                "image" -> { pendingImageCb?.invoke(result); pendingImageCb = null }
+            }
+        }
+    }
 
     private fun send(command: String, payload: JSONObject) {
         val envelope = JSONObject().apply {
