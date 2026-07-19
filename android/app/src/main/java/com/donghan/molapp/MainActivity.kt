@@ -56,6 +56,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 
+// Structure / state files above this are rejected before reading, to avoid OOM on huge inputs.
+private const val MAX_FILE_BYTES = 64L * 1024 * 1024
+
 class MainActivity : ComponentActivity() {
 
     private val bridge = MolStarBridge()
@@ -132,9 +135,11 @@ class MainActivity : ComponentActivity() {
                 "cif", "mmcif" -> "mmcif"
                 else -> { bridge.updateError("Unsupported structure file type: $name"); return }
             }
+            // Guard on the provider-reported size BEFORE reading, so a huge file is rejected instead
+            // of OOM-crashing the read itself.
+            querySize(uri)?.let { if (it > MAX_FILE_BYTES) { bridge.updateError("Structure file is too large."); return } }
             val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             if (text == null) { bridge.updateError("Could not read $name."); return }
-            if (text.toByteArray().size > 64 * 1024 * 1024) { bridge.updateError("Structure file is too large."); return }
             bridge.clearError()
             bridge.updateStatus("Loading $name")
             bridge.loadLocalStructure(text, format, name)
@@ -160,9 +165,9 @@ class MainActivity : ComponentActivity() {
 
     private fun openState(uri: Uri) {
         try {
+            querySize(uri)?.let { if (it > MAX_FILE_BYTES) { bridge.updateError("State file is too large."); return } }
             val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             if (text.isNullOrEmpty()) { bridge.updateError("Could not read .molapp file."); return }
-            if (text.toByteArray().size > 64 * 1024 * 1024) { bridge.updateError("State file is too large."); return }
             bridge.clearError()
             bridge.updateStatus("Loading state…")
             bridge.loadState(text)
@@ -203,7 +208,9 @@ class MainActivity : ComponentActivity() {
 
     private fun writeToUri(uri: Uri, bytes: ByteArray) {
         try {
-            contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+            val stream = contentResolver.openOutputStream(uri)
+            if (stream == null) { bridge.updateError("Could not write the file."); return }
+            stream.use { it.write(bytes) }
             bridge.updateStatus("Saved")
         } catch (e: Exception) {
             bridge.updateError(e.message ?: "Could not write the file.")
@@ -253,6 +260,12 @@ class MainActivity : ComponentActivity() {
     private fun queryDisplayName(uri: Uri): String? =
         contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
+        }
+
+    // Bytes reported by the provider, or null when unknown (some streamed providers omit SIZE).
+    private fun querySize(uri: Uri): Long? =
+        contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
         }
 
     override fun onDestroy() {

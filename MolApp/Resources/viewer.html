@@ -534,7 +534,10 @@
               }
               const o = window.molapp.objects[name];
               if (o) o.isHidden = !isVisible;
-              synced.push({ name: name, isVisible: isVisible });
+              // Only sync a native row that actually exists: ligandResns can list a residue whose
+              // loci was empty and never became a component/object, so emitting a row for it would
+              // update a control the panel doesn't have.
+              if (comp || o) synced.push({ name: name, isVisible: isVisible });
             }
             // Keep the lumped het components hidden so "Show Ligand" never resurrects a double-render.
             for (const s of structures) {
@@ -552,25 +555,24 @@
           // +ligand into one, so hiding it would blank the whole scene and leave the Water/Ligand
           // toggles dead. In atomic (stick/B+S/sphere) modes there's no polymer component, so the
           // Protein toggle simply no-ops there (water/ligand can't be split out of `all` anyway).
-          const wantTags = feature === 'protein'
-            ? ['structure-component-static-polymer']
-            : ['structure-component-static-' + feature];
           for (const s of structures) {
-            const components = s.components.filter(c => {
-              // Mol* tags the static water/ligand components on the transform as
-              // `structure-component-static-<feature>` (cell.obj carries no tags).
-              const tags = c.cell.transform.tags;
-              return Array.isArray(tags) && wantTags.some(t => tags.indexOf(t) !== -1);
-            });
-
+            // Ligand isn't a single tag: Mol* lumps het into static-ligand/ion/branched/lipid, so
+            // match the same set the split path uses (ligandLumpComponents) — otherwise "Hide Ligand"
+            // silently ignores a structure whose only het is an ion/sugar while still flipping the
+            // flag. Water/protein are single static tags.
+            const candidates = feature === 'ligand'
+              ? ligandLumpComponents(s)
+              : s.components.filter(c => {
+                  const tags = c.cell.transform.tags;
+                  const wantTag = 'structure-component-static-' + (feature === 'protein' ? 'polymer' : feature);
+                  return Array.isArray(tags) && tags.indexOf(wantTag) !== -1;
+                });
+            // isHidden is `undefined` (not `false`) while visible, so coerce before comparing. Toggle
+            // only the components whose current state differs from the request, so a mix of already-
+            // hidden and visible het components doesn't flip the ones already correct.
+            const components = candidates.filter(c => Boolean(c.cell.state.isHidden) === isVisible);
             if (components.length > 0) {
-              // isHidden is `undefined` (not `false`) while visible, so coerce both sides to Bool
-              // before comparing — a strict `undefined === false` would skip the toggle and leave
-              // water/ligand shown. Toggle only when current state differs from the request.
-              const currentHidden = Boolean(components[0].cell.state.isHidden);
-              if (currentHidden === isVisible) {
-                plugin.managers.structure.component.toggleVisibility(components);
-              }
+              plugin.managers.structure.component.toggleVisibility(components);
             }
           }
           postFeatureVisibility(feature, isVisible);
@@ -740,21 +742,28 @@
             if (!preset) throw new Error('Unknown representation: ' + representation);
             const target = findStructureObject(name);
             if (!target) throw new Error('Structure is unavailable: ' + name);
-            if (representation === 'surface') {
-              await applySurfaceRepresentation([target]);
-            } else {
-              await plugin.managers.structure.component.applyPreset([target], preset);
+            try {
+              if (representation === 'surface') {
+                await applySurfaceRepresentation([target]);
+              } else {
+                await plugin.managers.structure.component.applyPreset([target], preset);
+              }
+              const refreshed = findStructureObject(name) || target;
+              obj.structureRef = refreshed;
+              obj.representation = representation;
+              if (representation === 'stick' || representation === 'ballAndStick' || representation === 'sphere') {
+                await applyAtomicRepresentation(refreshed, representation);
+              }
+              // applyPreset on this structure rebuilt its lumped het components — re-split so the
+              // per-ligand rows stay in control (no double-render) after a structure repr change.
+              await refreshLigandSplit(false);
+              await applyStoredFeatureVisibility();
+            } catch (e) {
+              // The rebuild already mutated the scene — mark it so the pre-change undo snapshot is
+              // kept and the user can revert a half-applied representation change.
+              if (e) e.molappMutated = true;
+              throw e;
             }
-            const refreshed = findStructureObject(name) || target;
-            obj.structureRef = refreshed;
-            obj.representation = representation;
-            if (representation === 'stick' || representation === 'ballAndStick' || representation === 'sphere') {
-              await applyAtomicRepresentation(refreshed, representation);
-            }
-            // applyPreset on this structure rebuilt its lumped het components — re-split so the
-            // per-ligand rows stay in control (no double-render) after a structure repr change.
-            await refreshLigandSplit(false);
-            await applyStoredFeatureVisibility();
           } else if (obj.type === 'selection' && obj.loci) {
             const structures = plugin.managers.structure.hierarchy.current.structures;
             if (!structures.length || !obj.bundle) throw new Error('Selection is unavailable: ' + name);
@@ -782,20 +791,27 @@
             }
 
             if (!comp?.cell) throw new Error('Selection component could not be created: ' + name);
-            await clearComponentRepresentations(comp);
-            const colorHex = obj.colorHex || null;
-            const colorVal = colorHex ? hexToMolStarColor(colorHex) : 0x0072B2; // Okabe-Ito blue
-            await plugin.builders.structure.representation.addRepresentation(
-              comp.cell,
-              {
-                type: reprType,
-                ...(typeParams ? { typeParams } : {}),
-                color: 'uniform',
-                colorParams: { value: colorVal }
-              }
-            );
-            obj.componentRef = comp.ref || comp.cell.transform.ref;
-            obj.representation = representation;
+            try {
+              await clearComponentRepresentations(comp);
+              const colorHex = obj.colorHex || null;
+              const colorVal = colorHex ? hexToMolStarColor(colorHex) : 0x0072B2; // Okabe-Ito blue
+              await plugin.builders.structure.representation.addRepresentation(
+                comp.cell,
+                {
+                  type: reprType,
+                  ...(typeParams ? { typeParams } : {}),
+                  color: 'uniform',
+                  colorParams: { value: colorVal }
+                }
+              );
+              obj.componentRef = comp.ref || comp.cell.transform.ref;
+              obj.representation = representation;
+            } catch (e) {
+              // clearComponentRepresentations already removed the old repr — if addRepresentation
+              // rejects the selection is left empty, so keep the undo snapshot to allow revert.
+              if (e) e.molappMutated = true;
+              throw e;
+            }
           } else {
             throw new Error('Selection is unavailable: ' + name);
           }
@@ -1046,14 +1062,20 @@
           // Report the no-op instead of returning: a silent success makes native believe a change
           // happened and clear UI state the viewer still holds.
           if (!window.molapp.undoStack.length) throw new Error('Nothing to undo.');
-          window.molapp.redoStack.push(snapshotMolApp());
-          await restoreMolApp(window.molapp.undoStack.pop());
+          // Restore BEFORE mutating the stacks: if setSnapshot rejects, the scene is unchanged and
+          // we must not consume an undo level or leave a bogus redo entry.
+          const current = snapshotMolApp();
+          await restoreMolApp(window.molapp.undoStack[window.molapp.undoStack.length - 1]);
+          window.molapp.undoStack.pop();
+          window.molapp.redoStack.push(current);
         },
 
         redo: async function () {
           if (!window.molapp.redoStack.length) throw new Error('Nothing to redo.');
-          window.molapp.undoStack.push(snapshotMolApp());
-          await restoreMolApp(window.molapp.redoStack.pop());
+          const current = snapshotMolApp();
+          await restoreMolApp(window.molapp.redoStack[window.molapp.redoStack.length - 1]);
+          window.molapp.redoStack.pop();
+          window.molapp.undoStack.push(current);
         }
       };
 
