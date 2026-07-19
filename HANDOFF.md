@@ -1,75 +1,70 @@
-# HANDOFF: MolApp 1.0.2 shipped + submitted for App Store review
+# HANDOFF: Push `feat/android-iphone-port`, open a PR, merge to master
 
-**Written:** 2026-07-16 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `master`
+**Written:** 2026-07-19 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `feat/android-iphone-port`
 
 ## Goal
-
-Ship MolApp 1.0.2 (build 8) to the App Store and submit for review. **DONE.**
-Acceptance: build uploaded + `processingState` VALID, version submitted, state
-`WAITING_FOR_REVIEW`. All met. Nothing left on our side — Apple review runs on
-their end now.
+The user's last instruction, verbatim: **"commit push PR merge"**. Everything is already committed
+(working tree clean). Remaining: **push the branch, open a PR, merge it to `master`.** "Done" = the
+9 commits below are on `master` via a merged PR.
 
 ## Status
+Interrupted right before pushing (the user hit stop, then ran /handoff). Nothing pushed yet.
+- Branch `feat/android-iphone-port`, **working tree clean** (`git status` empty).
+- **9 commits ahead of `master`, 0 pushed** — `git rev-parse --abbrev-ref @{u}` → "no upstream
+  configured for branch 'feat/android-iphone-port'".
+- Remote `origin` = `https://github.com/deepnmr/MolApp.git`.
+- `gh` is installed (`/opt/homebrew/bin/gh`) and **authed as `deepnmr`** (`gh auth status` ✓).
 
-**Complete.** 1.0.2 / build 8 is `WAITING_FOR_REVIEW` (submitted 2026-07-16
-08:48 UTC). Working tree clean except this untracked `HANDOFF.md`.
-
-- appStoreVersion id `bde70b62-e5ba-46fe-b8b5-71e1ecfc1686`
-- build id `12c0189f-ea4c-4808-b89f-3037800ab7fd` (build 8)
-- reviewSubmission id `1ed1a77a-01cb-4692-9807-a829964dbf72`
-- Live before this: 1.0.1 (build 7), READY_FOR_SALE, train closed.
-
-## What shipped
-
-- **PR #7 `606fb6e`** — selection parsing + viewer state synchronization fix
-  (merged before this ship run).
-- **PR #8 `ced1ea7`** — version bump 1.0.2 / build 8 + **new AppIcon artwork**.
-  The 17 icon PNGs were the prior session's open question (flat green
-  protein-ribbon vs old teal ball-and-stick). **User explicitly chose the green
-  icons** — that decision is now resolved and committed. **[still applied]**
+The 9 commits (newest first), all this session's work:
+```
+1d81765 feat: persist viewport background color in saved state
+9166f4c feat(android): bring the full iOS File menu to Android
+5d6ce6c feat: change viewport background color via Display menu (both platforms)
+b000d17 docs: replace completed 1.0.2 handoff with Android/iPhone port render-fix handoff
+d02aa65 feat(android): per-object color picker in Objects panel (Okabe-Ito)
+6c89280 fix: render Mol* viewer in Android WebView (0-height canvas + float-blend)
+0a0783f feat: native Android app (Kotlin + Compose + WebView)
+4ba19a6 feat: iPhone support + cross-platform JS bridge shim
+dab678b docs: Android+iPhone port design spec
+```
 
 ## What worked
+- All feature work is done, built, and verified on emulator/sim (see per-commit messages). Both
+  iOS (iPhone 17 sim) and Android (emulator, `-gpu host` and `-gpu swiftshader_indirect`) render and
+  exercise: the port, the WebView black-screen fix, per-object Okabe-Ito color picker, Display ▸
+  Background, the full File menu (Save/Open State, Export PNG/JPEG/GIF/SVG/PDF, Print), and
+  background-in-saved-state. **[all still applied — committed]**
+- Android build: `cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleDebug -q` → BUILD OK.
+- iOS build: `xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /tmp/molapp_dd build` → BUILD SUCCEEDED.
 
-- Full pipeline: `xcodebuild archive` → `-exportArchive` (ExportOptions.plist,
-  manual signing, "MolViewApp AppStore" profile) → `xcrun altool --upload-app`.
-  Upload UUID `12c0189f-...`, VALID ~2 min after upload. **[n/a — process]**
-- **Submit via API** (scratchpad `submit.mjs` + `asc2.mjs`): create
-  appStoreVersion(1.0.2) → PATCH `relationships/build` → set `whatsNew` on en-US
-  localization → POST reviewSubmissions{platform:IOS} → POST
-  reviewSubmissionItems → PATCH submitted=true. Worked first try. Export
-  compliance auto (Info.plist `ITSAppUsesNonExemptEncryption=false`).
-- Scratchpad helpers:
-  `/private/tmp/claude-501/-Users-donghanlee-work-projects-molapp/5096044b-7fe2-43f8-adc7-256b1ac67132/scratchpad/`
-  — `asc2.mjs` (multi-method ES256 JWT client), `submit.mjs`, `poll.mjs` (build
-  processing poll), `asc.mjs` (GET-only version query).
+## What didn't work / cautions
+- Nothing failed. Not yet attempted: `git push`, `gh pr create`, `gh pr merge`.
+- **`HANDOFF.md` is tracked** and was committed on this branch (commit `b000d17` rewrote it). This file
+  you're reading will change again after this /handoff — decide whether to commit that change before or
+  after the PR. It is NOT part of the product; a stray uncommitted HANDOFF.md edit is fine to leave or
+  commit separately. (Right now, after this write, `git status` will show HANDOFF.md modified.)
+- `master`'s recent history uses squash-merged PRs (e.g. `07e45a8`, `ced1ea7 (#8)`). Match that: the
+  user likely wants a squash merge. Confirm merge style if unsure.
+- The user's default GitHub account per memory is fine here — `gh` is authed as `deepnmr`, which owns
+  the repo. (Play Store account note `lee.donghan@gmail.com` is unrelated to this git push.)
 
-## What didn't work
-
-- **`xcrun agvtool new-marketing-version 1.0.2` does NOT apply** in this repo —
-  left `MARKETING_VERSION` at 1.0.1. Fix: `sed -i '' 's/MARKETING_VERSION =
-  1.0.1;/MARKETING_VERSION = 1.0.2;/g' MolApp.xcodeproj/project.pbxproj`.
-  `agvtool new-version -all 8` (build number) DOES work. **[n/a]**
-- Archive build-phase logs "Apple **Development**" signing — that's the build
-  step; export re-signs with the distribution cert per ExportOptions.plist.
-  Not an error, don't chase it. **[n/a]**
-
-## Key files & commands
-
-- `MolApp.xcodeproj/project.pbxproj` — `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`. Edit via sed, not agvtool.
-- `ExportOptions.plist` — manual signing, team `6536ULS8SC`, profile "MolViewApp AppStore". Ready to reuse.
-- ASC creds: key `~/.appstoreconnect/private_keys/AuthKey_CGV9U72GU7.p8`, issuer `9c0e6248-43c6-405d-8c0b-943a8e02ec61`, app id `6786979305`. Env vars `ASC_*` are UNSET — scripts hardcode the ids.
-- `node scratchpad/submit.mjs` — full submit flow (idempotent-ish; reuses open reviewSubmission).
-
-## Next steps
-
-Nothing required. If continuing later:
-1. Watch review outcome: `GET /v1/reviewSubmissions/1ed1a77a-01cb-4692-9807-a829964dbf72` → state.
-2. **Next release = 1.0.3 / build 9+** (build 8 and version 1.0.2 are burned).
-3. Decide whether to keep or delete this `HANDOFF.md` (untracked).
+## Next steps (start here)
+1. Decide whether to commit the post-handoff `HANDOFF.md` change (optional; not product code).
+2. Push with upstream:
+   `git push -u origin feat/android-iphone-port`
+3. Open the PR (base master). Title/body should summarize the 9 commits — Android+iPhone port + render
+   fix + color picker + background menu + File-menu parity + background-in-state:
+   `gh pr create --base master --head feat/android-iphone-port --title "Android + iPhone port" --body "..."`
+4. Merge (squash to match repo history), and delete the branch:
+   `gh pr merge --squash --delete-branch`
+   — If the user wants a merge commit instead of squash, use `--merge`. Confirm first if unsure.
+5. Report the PR URL and merged-commit SHA back to the user.
 
 ## Open questions / risks
-
-- **App icon is now the green protein-ribbon render** by user choice. If it
-  looks wrong on a home screen after review, that's a design revisit for a
-  future version, not a bug in this ship.
-- Review outcome unverified (just submitted).
+- **Merge style unconfirmed** — squash (matches history) vs merge commit. Default to squash; ask only
+  if the user cares.
+- No CI status checked — unverified whether the repo has required checks that block merge. If
+  `gh pr merge` reports pending/failed checks, surface them to the user rather than force-merging.
+- Pushing + merging to `master` is outward-facing and hard to reverse. The user explicitly asked for
+  "commit push PR merge", so authorization is clear — but if anything looks off (unexpected diff on the
+  PR, checks failing), stop and report instead of proceeding.

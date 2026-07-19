@@ -27,6 +27,7 @@ private let defaultVisibilityStates = Dictionary(
 )
 
 struct MoleculeViewerView: View {
+    @Environment(\.horizontalSizeClass) private var hSizeClass
     @StateObject private var bridge = MolStarBridge()
     @State private var isFileImporterPresented = false
     @State private var pdbIdText = ""
@@ -235,6 +236,31 @@ struct MoleculeViewerView: View {
     }
 
     private var menuBar: some View {
+        // iPad has room for all six menus in a row; iPhone (compact width) does not, so scroll them
+        // horizontally instead of letting the row overflow and clip. Layout otherwise identical.
+        Group {
+            if hSizeClass == .compact {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    menuItems.padding(.horizontal, 12)
+                }
+            } else {
+                HStack(spacing: 20) {
+                    menuItems
+                    Spacer()
+                }
+                .padding(.leading, 80)
+                .padding(.trailing, 14)
+            }
+        }
+        .font(.body.weight(.semibold))
+        .foregroundStyle(.white)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.68))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 8)
+    }
+
+    private var menuItems: some View {
         HStack(spacing: 20) {
             Menu("File") {
                 Button {
@@ -348,6 +374,18 @@ struct MoleculeViewerView: View {
                         }
                     }
                 }
+
+                Section("Background") {
+                    ForEach(Self.backgroundPresets) { preset in
+                        Button {
+                            localErrorMessage = nil
+                            bridge.setBackgroundColor(colorHex: preset.hex)
+                            statusMessage = "Background: \(preset.title)"
+                        } label: {
+                            Label(preset.title, systemImage: "square.fill")
+                        }
+                    }
+                }
             }
 
             Menu("Calculation") {
@@ -431,17 +469,7 @@ struct MoleculeViewerView: View {
                     Label("Quick Help", systemImage: "questionmark.circle")
                 }
             }
-
-            Spacer()
         }
-        .font(.body.weight(.semibold))
-        .foregroundStyle(.white)
-        .padding(.leading, 80)
-        .padding(.trailing, 14)
-        .padding(.vertical, 10)
-        .background(.black.opacity(0.68))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, 8)
     }
 
     private var commandBar: some View {
@@ -566,6 +594,17 @@ struct MoleculeViewerView: View {
                 bridge.setObjectColor(name: objName, colorHex: colorHex)
             } else {
                 localErrorMessage = "Usage: color [red|green|blue|yellow|white|cyan|magenta|orange|#RRGGBB|default] [name]"
+            }
+        case "background", "bg":
+            let arg = components.count >= 2 ? components[1] : ""
+            let hex: String? = arg.hasPrefix("#")
+                ? arg.uppercased()
+                : Self.backgroundPresets.first { $0.title.lowercased() == arg }?.hex
+            if let hex, hex.range(of: "^#[0-9A-Fa-f]{6}$", options: .regularExpression) != nil {
+                bridge.setBackgroundColor(colorHex: hex)
+                statusMessage = "Background set"
+            } else {
+                localErrorMessage = "Usage: background [dark|black|gray|light|white|#RRGGBB]"
             }
         case "clear":
             bridge.clearSelection()
@@ -748,6 +787,21 @@ struct MoleculeViewerView: View {
         if name.hasPrefix("#") { return name }
         return Self.namedColors[name] ?? "#FFFFFF"
     }
+
+    // Viewport background presets (dark → light). Shared by the Display ▸ Background menu and the
+    // `background` command so both offer the same names.
+    struct BackgroundPreset: Identifiable {
+        let title: String
+        let hex: String
+        var id: String { hex }
+    }
+    static let backgroundPresets: [BackgroundPreset] = [
+        .init(title: "Dark", hex: "#0B0F14"),
+        .init(title: "Black", hex: "#000000"),
+        .init(title: "Gray", hex: "#4D4D4D"),
+        .init(title: "Light", hex: "#D9D9D9"),
+        .init(title: "White", hex: "#FFFFFF"),
+    ]
 
     private var objectsPanel: some View {
         VStack(alignment: .leading, spacing: 6) {
