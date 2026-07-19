@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -24,10 +25,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -299,14 +302,28 @@ private fun ObjectsPanel(bridge: MolStarBridge) {
 
 @Composable
 private fun ObjectRow(bridge: MolStarBridge, obj: MolAppObject) {
+    var showColorPicker by remember { mutableStateOf(false) }
     Column(Modifier.padding(top = 6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(if (obj.isVisible) "◉" else "○", color = if (obj.isVisible) Color.White else Color.White.copy(alpha = 0.35f),
                 modifier = Modifier.clickable { bridge.setObjectVisibility(obj.name, !obj.isVisible) }.padding(end = 6.dp))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(obj.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(obj.type, color = Color.White.copy(alpha = 0.45f), fontSize = 11.sp)
+            }
+            // Per-object color: swatch shows the current color; tap opens the Okabe-Ito picker (mirrors iOS).
+            Box {
+                Box(
+                    Modifier.size(16.dp)
+                        .background(obj.colorHex?.let(::colorFromHex) ?: Color.White.copy(alpha = 0.3f), CircleShape)
+                        .border(0.5.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                        .clickable { showColorPicker = true }
+                )
+                ColorPickerMenu(expanded = showColorPicker, onDismiss = { showColorPicker = false }) { hex ->
+                    bridge.setObjectColor(obj.name, hex)
+                    showColorPicker = false
+                }
             }
         }
         Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -318,10 +335,41 @@ private fun ObjectRow(bridge: MolStarBridge, obj: MolAppObject) {
                     ).clickable { bridge.setObjectRepresentation(obj.name, rep) }.padding(horizontal = 5.dp, vertical = 3.dp))
             }
         }
-        // ponytail: per-object color set via the `color <name> <object>` command; no swatch row in the
-        // panel yet. Add a color picker here if touch color-setting is requested.
     }
 }
+
+// Okabe-Ito swatch picker, mirroring iOS's colorPickerPopover: "Default" clears the override (null hex),
+// the rest map to the shared namedColors palette. Laid out 5 per row to match the iOS grid.
+private val colorPickerKeys = listOf(
+    "default", "red", "green", "blue", "yellow", "white", "cyan", "magenta", "orange",
+)
+
+@Composable
+private fun ColorPickerMenu(expanded: Boolean, onDismiss: () -> Unit, onPick: (String?) -> Unit) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, modifier = Modifier.background(Color(0xFF15151A))) {
+        Text("Color", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+            for (rowKeys in colorPickerKeys.chunked(5)) {
+                Row(Modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (key in rowKeys) {
+                        val hex = if (key == "default") null else colorNameToHex(key)
+                        Box(
+                            Modifier.size(26.dp)
+                                .background(hex?.let(::colorFromHex) ?: Color.White.copy(alpha = 0.35f), CircleShape)
+                                .border(0.5.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                                .clickable { onPick(hex) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Parse "#RRGGBB" to a Compose Color; falls back to a faint neutral for malformed values (JS-sourced). */
+private fun colorFromHex(hex: String): Color =
+    runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Color.White.copy(alpha = 0.3f))
 
 @Composable
 private fun CommandBar(controller: ViewerController) {
