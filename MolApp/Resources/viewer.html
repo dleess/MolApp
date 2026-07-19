@@ -72,6 +72,18 @@
       let lastTapTime = 0;
       let nativeCommandQueue = Promise.resolve();
 
+      // JS -> native transport. iOS uses a WKScriptMessageHandler (structured object); Android uses a
+      // @JavascriptInterface that only accepts strings, so it gets a JSON string. Native->JS is the
+      // same on both (evaluateJavaScript of window.molapp.handleNativeCommand), so only this direction
+      // needs a shim.
+      function postToNative(obj) {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
+          window.webkit.messageHandlers.molapp.postMessage(obj);
+        } else if (window.MolAppAndroid && typeof window.MolAppAndroid.postMessage === 'function') {
+          window.MolAppAndroid.postMessage(JSON.stringify(obj));
+        }
+      }
+
       function showError(error) {
         const message = error && error.message ? error.message : String(error);
         const fatal = !window.molapp || !window.molapp.viewer;
@@ -84,33 +96,22 @@
       }
 
       function postViewerEvent(event) {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
-          window.webkit.messageHandlers.molapp.postMessage(event);
-        }
+        postToNative(event);
       }
 
       function postCommandResult(result) {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
-          window.webkit.messageHandlers.molapp.postMessage(result);
-        }
+        postToNative(result);
       }
 
       function postSelectionChanged(selection) {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
-          window.webkit.messageHandlers.molapp.postMessage({
-            event: 'selectionChanged',
-            selection
-          });
-        }
+        postToNative({ event: 'selectionChanged', selection });
       }
 
       let lastHoverLabel = null;
       function postPencilHover(label) {
         if (label === lastHoverLabel) return;
         lastHoverLabel = label;
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
-          window.webkit.messageHandlers.molapp.postMessage({ event: 'pencilHover', label });
-        }
+        postToNative({ event: 'pencilHover', label });
       }
 
       function structureCount() {
@@ -1579,30 +1580,26 @@
       }
 
       function postLigandObjects(objects) {
-        if (objects && objects.length && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
-          window.webkit.messageHandlers.molapp.postMessage({ event: 'objectsAdded', objects: objects });
+        if (objects && objects.length) {
+          postToNative({ event: 'objectsAdded', objects: objects });
         }
       }
 
       // Sync native object rows to a visibility change JS made out-of-band (the master Ligand toggle).
       function postObjectVisibility(items) {
-        if (items && items.length && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
-          window.webkit.messageHandlers.molapp.postMessage({ event: 'objectsVisibility', items: items });
+        if (items && items.length) {
+          postToNative({ event: 'objectsVisibility', items: items });
         }
       }
 
       // Sync a native Display>Visibility toggle (water/ligand/protein) that JS changed on its own.
       function postFeatureVisibility(feature, isVisible) {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
-          window.webkit.messageHandlers.molapp.postMessage({ event: 'featureVisibility', feature: feature, isVisible: isVisible });
-        }
+        postToNative({ event: 'featureVisibility', feature: feature, isVisible: isVisible });
       }
 
       // Replace the whole native Objects panel after undo/redo/reset rebuilt the JS state.
       function postObjectsReplaced(objects, visibility) {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
-          window.webkit.messageHandlers.molapp.postMessage({ event: 'objectsReplaced', objects: objects, visibility: visibility });
-        }
+        postToNative({ event: 'objectsReplaced', objects: objects, visibility: visibility });
       }
 
       // Molecular surface is computed per atom, so each isolated crystallographic water becomes a
@@ -1921,9 +1918,7 @@
       }
 
       function postMeasurement(label) {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
-          window.webkit.messageHandlers.molapp.postMessage({ event: 'measurement', label });
-        }
+        postToNative({ event: 'measurement', label });
       }
 
       // Atoms needed before a measurement is drawn: distance 2, angle 3, dihedral 4.

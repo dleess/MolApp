@@ -27,6 +27,7 @@ private let defaultVisibilityStates = Dictionary(
 )
 
 struct MoleculeViewerView: View {
+    @Environment(\.horizontalSizeClass) private var hSizeClass
     @StateObject private var bridge = MolStarBridge()
     @State private var isFileImporterPresented = false
     @State private var pdbIdText = ""
@@ -235,6 +236,31 @@ struct MoleculeViewerView: View {
     }
 
     private var menuBar: some View {
+        // iPad has room for all six menus in a row; iPhone (compact width) does not, so scroll them
+        // horizontally instead of letting the row overflow and clip. Layout otherwise identical.
+        Group {
+            if hSizeClass == .compact {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    menuItems.padding(.horizontal, 12)
+                }
+            } else {
+                HStack(spacing: 20) {
+                    menuItems
+                    Spacer()
+                }
+                .padding(.leading, 80)
+                .padding(.trailing, 14)
+            }
+        }
+        .font(.body.weight(.semibold))
+        .foregroundStyle(.white)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.68))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 8)
+    }
+
+    private var menuItems: some View {
         HStack(spacing: 20) {
             Menu("File") {
                 Button {
@@ -431,17 +457,7 @@ struct MoleculeViewerView: View {
                     Label("Quick Help", systemImage: "questionmark.circle")
                 }
             }
-
-            Spacer()
         }
-        .font(.body.weight(.semibold))
-        .foregroundStyle(.white)
-        .padding(.leading, 80)
-        .padding(.trailing, 14)
-        .padding(.vertical, 10)
-        .background(.black.opacity(0.68))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, 8)
     }
 
     private var commandBar: some View {
