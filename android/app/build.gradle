@@ -12,13 +12,26 @@ android {
         minSdk 26
         targetSdk 34
         versionCode 1
-        versionName "1.0.0"
+        versionName "1.0.3"
+    }
+
+    // Upload-key signing. Credentials live in ~/.gradle/gradle.properties, never in git.
+    signingConfigs {
+        release {
+            if (project.hasProperty('MOLAPP_STORE_FILE')) {
+                storeFile file(MOLAPP_STORE_FILE)
+                storePassword MOLAPP_STORE_PASSWORD
+                keyAlias MOLAPP_KEY_ALIAS
+                keyPassword MOLAPP_KEY_PASSWORD
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig project.hasProperty('MOLAPP_STORE_FILE') ? signingConfigs.release : null
         }
     }
     compileOptions {
