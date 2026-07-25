@@ -68,6 +68,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var createDoc: ActivityResultLauncher<String>
     private var pendingSaveBytes: ByteArray? = null
     private var webView: WebView? = null
+    // A SAF picker takes ~1s to appear, so an impatient second tap used to stack a second picker
+    // activity on top of the first. One back press then only closed the top one and the screen
+    // looked unchanged — it read as "the file window won't close". Cleared in onResume, which is
+    // the one point we are guaranteed to pass through on the way back from any picker.
+    private var pickerOpen = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,9 +96,9 @@ class MainActivity : ComponentActivity() {
         webView = wv
 
         val fileActions = FileActions(
-            onOpenStructure = { openDoc.launch(arrayOf("*/*")) },
+            onOpenStructure = { launchOnce(openDoc, arrayOf("*/*")) },
             onSaveState = { saveState() },
-            onOpenState = { openStateDoc.launch(arrayOf("*/*")) },
+            onOpenState = { launchOnce(openStateDoc, arrayOf("*/*")) },
             onExport = { exportImage(it) },
             onPrint = { printDisplay() },
         )
@@ -127,6 +132,18 @@ class MainActivity : ComponentActivity() {
         loadUrl("file:///android_asset/viewer.html")
     }
 
+    /** Launches a SAF picker unless one is already up. Returns false only if the launch itself failed. */
+    private fun <I> launchOnce(launcher: ActivityResultLauncher<I>, input: I): Boolean {
+        if (pickerOpen) return true
+        pickerOpen = true
+        return runCatching { launcher.launch(input) }.isSuccess.also { if (!it) pickerOpen = false }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        pickerOpen = false
+    }
+
     private fun loadLocalStructure(uri: Uri) {
         try {
             val name = queryDisplayName(uri) ?: "structure"
@@ -158,8 +175,7 @@ class MainActivity : ComponentActivity() {
             if (json.isNullOrEmpty()) { bridge.updateError("Could not capture current state."); return@requestSerializedState }
             pendingSaveBytes = json.toByteArray(Charsets.UTF_8)
             bridge.updateStatus("Choose where to save…")
-            runCatching { createDoc.launch("molecule.molapp") }
-                .onFailure { bridge.updateError("Could not open the save dialog.") }
+            if (!launchOnce(createDoc, "molecule.molapp")) bridge.updateError("Could not open the save dialog.")
         }
     }
 
@@ -189,8 +205,7 @@ class MainActivity : ComponentActivity() {
             if (bytes == null) { bridge.updateError("Could not encode ${format.title}."); return@requestImageDataUrl }
             pendingSaveBytes = bytes
             bridge.updateStatus("Choose where to save…")
-            runCatching { createDoc.launch("molecule.${format.ext}") }
-                .onFailure { bridge.updateError("Could not open the save dialog.") }
+            if (!launchOnce(createDoc, "molecule.${format.ext}")) bridge.updateError("Could not open the save dialog.")
         }
     }
 
