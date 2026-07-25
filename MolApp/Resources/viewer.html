@@ -1024,15 +1024,17 @@
         setMeasureMode: async function (payload) {
           const enabled = Boolean(payload.enabled);
           const plugin = window.molapp.viewer.plugin;
-          window.molapp.measurePending = [];
+          clearMeasurePending();
           window.molapp.measureKind = payload.kind || 'distance';
           if (enabled && !window.molapp.measureMode) {
             // Pick individual atoms (not whole residues) so measurements are atom-to-atom.
             window.molapp.prevGranularity = plugin.managers.interactivity.props.granularity;
             plugin.managers.interactivity.setProps({ granularity: 'element' });
+            // Picked atoms are marked with the same overlay a normal selection uses, so drop any
+            // standing selection — otherwise its mark is indistinguishable from a measure pick.
+            setMolAppSelection(null);
           } else if (!enabled && window.molapp.measureMode) {
             plugin.managers.interactivity.setProps({ granularity: window.molapp.prevGranularity || 'residue' });
-            plugin.managers.interactivity.lociHighlights.clearHighlights();
           }
           window.molapp.measureMode = enabled;
         },
@@ -1880,7 +1882,7 @@
         }
         window.molapp.measureMode = false;
         window.molapp.measureKind = 'distance';
-        window.molapp.measurePending = [];
+        clearMeasurePending();
         window.molapp.prevGranularity = null;
         window.molapp.morphing = false;
         await plugin.managers.animation.stop();
@@ -1968,6 +1970,17 @@
         postToNative({ event: 'measurement', label });
       }
 
+      // Atoms picked so far are marked in the structure until the measurement is drawn (or the
+      // pending set is abandoned). Highlight alone is not enough: it only ever shows the newest
+      // atom, and Mol* wipes that layer on the next hover event.
+      function clearMeasurePending() {
+        window.molapp.measurePending = [];
+        if (!window.molapp.viewer) return;
+        const interactivity = window.molapp.viewer.plugin.managers.interactivity;
+        interactivity.lociHighlights.clearHighlights();
+        interactivity.lociSelects.deselectAll();
+      }
+
       // Atoms needed before a measurement is drawn: distance 2, angle 3, dihedral 4.
       function measureTargetCount(kind) {
         return kind === 'angle' ? 3 : kind === 'dihedral' ? 4 : 2;
@@ -1988,7 +2001,10 @@
         // repeat tap on the atom just picked (consecutive duplicate).
         if (pending.length && SE.Loci.areEqual(pending[pending.length - 1].loci, atom)) return;
         pending.push({ loci: atom, label });
-        window.molapp.viewer.plugin.managers.interactivity.lociHighlights.highlightOnly({ loci: atom }, true);
+        const interactivity = window.molapp.viewer.plugin.managers.interactivity;
+        // select() is additive and persistent, so every atom picked so far stays marked.
+        interactivity.lociSelects.select({ loci: atom }, true);
+        interactivity.lociHighlights.highlightOnly({ loci: atom }, true);
         const target = measureTargetCount(window.molapp.measureKind);
         if (pending.length >= target) {
           const picks = pending.slice(0, target);
@@ -2013,14 +2029,15 @@
           const message = error && error.message ? error.message : String(error);
           postCommandResult({ id: 'measure', command: 'measureDistance', success: false, error: message });
         } finally {
-          window.molapp.viewer.plugin.managers.interactivity.lociHighlights.clearHighlights();
+          // The drawn measurement identifies the atoms from here on; drop the pick marks.
+          clearMeasurePending();
         }
       }
 
       // Mol* stores every distance/angle under cells tagged 'measurement-group'; deleting those
       // refs removes all measurements (same ref-delete pattern as surface potential / superpose).
       async function clearMeasurementsInternal() {
-        window.molapp.measurePending = [];
+        clearMeasurePending();
         const plugin = window.molapp.viewer.plugin;
         const refs = [];
         plugin.state.data.cells.forEach(function (cell) {
