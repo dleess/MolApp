@@ -443,6 +443,11 @@ final class MolStarBridge: NSObject, ObservableObject {
             return
         }
 
+        // An event this shell does not handle (the shared viewer serves three shells, and the
+        // Flutter one reads events SwiftUI has no UI for) is not a command result — ignore it
+        // rather than throwing a decode error into lastErrorMessage and showing a bogus banner.
+        if let dict = messageBody as? [String: Any], dict["event"] is String { return }
+
         receive(result: try decoder.decode(MolStarCommandResult.self, from: data))
     }
 }
