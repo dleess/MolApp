@@ -36,6 +36,27 @@ MolStarBridge readyBridge(FakeJsRunner runner) {
 }
 
 void main() {
+  group('objectsReplaced', () {
+    test('survives a non-string representation from a hand-edited state file', () {
+      // .molapp files are user-editable and viewer.html echoes `representation` back unvalidated,
+      // so the message boundary has to type-check it the way it already does name and type.
+      final bridge = readyBridge(FakeJsRunner());
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'objectsReplaced',
+        'objects': <dynamic>[
+          <String, dynamic>{
+            'name': '1CRN',
+            'type': 'structure',
+            'representation': 5,
+            'colorHex': 7,
+          },
+        ],
+      });
+      expect(bridge.objects.single.representation, ObjectRepresentation.ribbon);
+      expect(bridge.objects.single.colorHex, isNull);
+    });
+  });
+
   group('MolStarCommandResult', () {
     test('decodes a known command', () {
       final result = MolStarCommandResult.fromJson(

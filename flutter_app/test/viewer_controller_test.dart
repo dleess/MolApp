@@ -136,6 +136,14 @@ void main() {
       expect(h.controller.errorMessage, startsWith('Usage: color'));
     });
 
+    test('color rejects a malformed hex instead of sending NaN to the viewer', () {
+      // hexToMolStarColor in viewer.html is a bare parseInt, so a bad hex paints the object NaN
+      // (black) with no error anywhere — the same reason `background` validates its argument.
+      final h = _Harness()..run('color #12345 1CRN');
+      expect(h.controller.errorMessage, startsWith('Usage: color'));
+      expect(h.runner.evaluated, isEmpty);
+    });
+
     test('background accepts a preset name and a raw hex', () {
       final h = _Harness()..run('background white');
       expect(h.lastPayload['colorHex'], '#FFFFFF');

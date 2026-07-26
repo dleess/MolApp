@@ -34,15 +34,15 @@ Uint8List? bytesFromDataUrl(String dataUrl) {
 }
 
 /// The PNG from JS is the source of truth; re-encode it into the requested container.
-Uint8List encodeExport(Uint8List png, ExportFormat format) {
+Future<Uint8List> encodeExport(Uint8List png, ExportFormat format) async {
   switch (format) {
     case ExportFormat.png:
       return png;
     case ExportFormat.jpeg:
-      return Uint8List.fromList(img.encodeJpg(_decode(png), quality: 95));
+      return img.encodeJpg(_decode(png), quality: 95);
     case ExportFormat.gif:
       // Single frame: the viewport is a still, matching the native apps' GIF export.
-      return Uint8List.fromList(img.encodeGif(_decode(png)));
+      return img.encodeGif(_decode(png));
     case ExportFormat.svg:
       return _svgWrapping(png);
     case ExportFormat.pdf:
@@ -67,10 +67,10 @@ Uint8List _svgWrapping(Uint8List png) {
       'width="$width" height="$height" viewBox="0 0 $width $height">\n'
       '<image width="$width" height="$height" xlink:href="data:image/png;base64,$base64"/>\n'
       '</svg>\n';
-  return Uint8List.fromList(utf8.encode(svg));
+  return utf8.encode(svg);
 }
 
-Uint8List _pdfWrapping(Uint8List png) {
+Future<Uint8List> _pdfWrapping(Uint8List png) {
   final decoded = _decode(png);
   final document = pw.Document();
   final image = pw.MemoryImage(png);
@@ -80,7 +80,7 @@ Uint8List _pdfWrapping(Uint8List png) {
       build: (context) => pw.FullPage(ignoreMargins: true, child: pw.Image(image)),
     ),
   );
-  return Uint8List.fromList(document.save() as List<int>);
+  return document.save();
 }
 
 /// Hands finished bytes to the user: a Save-as dialog on desktop, the share sheet on mobile.
@@ -126,21 +126,6 @@ Future<void> printImage(Uint8List png) async {
       return document.save();
     },
   );
-}
-
-String mimeTypeFor(ExportFormat format) {
-  switch (format) {
-    case ExportFormat.png:
-      return 'image/png';
-    case ExportFormat.jpeg:
-      return 'image/jpeg';
-    case ExportFormat.gif:
-      return 'image/gif';
-    case ExportFormat.svg:
-      return 'image/svg+xml';
-    case ExportFormat.pdf:
-      return 'application/pdf';
-  }
 }
 
 String _basename(String path) {

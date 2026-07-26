@@ -50,28 +50,36 @@ void main() {
   });
 
   group('wire-format contracts', () {
-    // These raw values are the payload keys viewer.html switches on; renaming one silently breaks
-    // the corresponding command.
+    // Enum names ARE the payload keys viewer.html switches on; renaming a value silently breaks
+    // the corresponding command, so pin the names themselves.
     test('visibility feature keys', () {
-      expect(MoleculeVisibilityFeature.protein.raw, 'protein');
-      expect(MoleculeVisibilityFeature.water.raw, 'water');
-      expect(MoleculeVisibilityFeature.ligand.raw, 'ligand');
+      expect(MoleculeVisibilityFeature.values.map((e) => e.name), <String>[
+        'protein',
+        'water',
+        'ligand',
+      ]);
     });
 
-    test('object representation raw values', () {
-      expect(ObjectRepresentation.ribbon.raw, 'ribbon');
-      expect(ObjectRepresentation.surface.raw, 'surface');
-      expect(ObjectRepresentation.stick.raw, 'stick');
-      expect(ObjectRepresentation.ballAndStick.raw, 'ballAndStick');
-      expect(ObjectRepresentation.sphere.raw, 'sphere');
+    test('object representation wire names', () {
+      expect(ObjectRepresentation.values.map((e) => e.name), <String>[
+        'ribbon',
+        'surface',
+        'stick',
+        'ballAndStick',
+        'sphere',
+      ]);
     });
 
-    test('scene representation raw values', () {
-      expect(MoleculeRepresentation.values.map((e) => e.raw), <String>[
+    test('scene representation wire names', () {
+      expect(MoleculeRepresentation.values.map((e) => e.name), <String>[
         'ribbon',
         'surface',
         'stick',
       ]);
+    });
+
+    test('measure kind wire names', () {
+      expect(MeasureKind.values.map((e) => e.name), <String>['distance', 'angle', 'dihedral']);
     });
 
     test('measure kinds carry the pick count', () {
