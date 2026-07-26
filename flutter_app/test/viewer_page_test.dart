@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:molapp/src/molstar_bridge.dart';
@@ -193,6 +194,53 @@ void main() {
     bridge.updateHoverPoint(const Offset(300, 400));
     await tester.pump();
     expect(find.text('GLY A 1 CA'), findsOneWidget);
+  });
+
+  testWidgets('the chrome clears the status-bar inset while the viewport stays full-bleed',
+      (tester) async {
+    // Without SafeArea the menu bar's `top: 8` put the whole row inside the iPhone's 59pt inset,
+    // where the Dynamic Island covered Display outright and the system swallowed every tap in the
+    // upper 46pt of each button. The hover tooltip must NOT move with it: its coordinates come
+    // from the webview, which fills the un-inset window.
+    const inset = 59.0;
+    tester.view.padding = FakeViewPadding(top: inset * tester.view.devicePixelRatio);
+    final bridge = await pumpViewer(tester);
+
+    expect(tester.getTopLeft(find.widgetWithText(TextButton, 'File')).dy,
+        greaterThanOrEqualTo(inset));
+
+    bridge.receiveMessage(<String, dynamic>{'event': 'pencilHover', 'label': 'GLY A 1 CA'});
+    bridge.updateHoverPoint(const Offset(300, 400));
+    await tester.pump();
+    expect(tester.getTopLeft(find.text('GLY A 1 CA')).dy, lessThan(400 - 28 + inset));
+  });
+
+  testWidgets('on an iPad the menu bar starts below the window-control pill', (tester) async {
+    // iPadOS 26 draws the pill inside the app's content and reports no inset for it, so SafeArea
+    // alone still left File and Edit buried under it. The display, not the window, is what says
+    // "iPad": in windowed mode MediaQuery reports a window that can be phone-sized.
+    tester.view.display
+      ..size = const Size(2048, 2732)
+      ..devicePixelRatio = 2;
+    addTearDown(tester.view.display.reset);
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+
+    await pumpViewer(tester, size: const Size(600, 800));
+    await tester.enterText(find.byType(TextField).last, 'measure dihedral');
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+
+    final file = tester.getRect(find.widgetWithText(TextButton, 'File'));
+    final banner = tester.getRect(find.text('Dihedral mode — pick 4 atoms'));
+    // Must be cleared inside the body: the framework asserts on leftover debug vars before
+    // addTearDown callbacks run.
+    debugDefaultTargetPlatformOverride = null;
+
+    expect(file.top, greaterThanOrEqualTo(44));
+    // The banner is the last child of the overlay Stack, so it wins the paint. Left at an absolute
+    // offset it printed straight over the menu labels once the bar moved down on iPad.
+    expect(banner.top, greaterThanOrEqualTo(file.bottom));
   });
 
   testWidgets('the menu bar scrolls instead of clipping on a narrow window', (tester) async {

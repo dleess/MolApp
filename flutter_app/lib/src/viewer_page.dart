@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -78,11 +79,24 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
             fit: StackFit.expand,
             children: <Widget>[
               viewport!,
-              _menuBar(isCompact: isCompact),
-              _infoCard(),
-              _objectsPanel(),
-              _commandBar(),
-              ?banner,
+              // The chrome — and only the chrome — is inset. Without this the menu bar's
+              // `top: 8` puts it inside the iPhone's 59pt status-bar inset, where the Dynamic
+              // Island covers Display outright and the system swallows the taps, and inside the
+              // iPadOS window-control pill, which lands on File. The viewport stays full-bleed
+              // because it is a 3D scene, and so does the hover tooltip, whose coordinates come
+              // from the webview and are therefore in the un-inset space.
+              SafeArea(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: <Widget>[
+                    _menuBar(isCompact: isCompact),
+                    _infoCard(),
+                    _objectsPanel(),
+                    _commandBar(),
+                    ?banner,
+                  ],
+                ),
+              ),
               ?tooltip,
             ],
           );
@@ -129,7 +143,9 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
         : '${kind.title} mode — ${picked.join(', ')} '
             '(pick $remaining more)';
     return Positioned(
-      top: 60,
+      // Rides under the menu bar, which moves on iPad. Left absolute it painted straight over the
+      // menu labels there — the banner is the last child of this Stack, so it wins the paint.
+      top: _menuBarTop(context) + 52,
       left: 0,
       right: 0,
       child: IgnorePointer(
@@ -176,7 +192,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
     ];
 
     return Positioned(
-      top: 8,
+      top: _menuBarTop(context),
       left: 0,
       right: 0,
       child: Container(
@@ -194,6 +210,23 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
               ),
       ),
     );
+  }
+
+  /// iPadOS 26 floats its window-control pill *inside* the app's own content at the top-leading
+  /// corner and does not report it as a safe-area inset — measured on the simulator, `padding.left`
+  /// stays 0 and `padding.top` is only ~11pt, and the pill grows to cover File and Edit outright
+  /// the moment it is touched. Flutter surfaces no inset for it (`MediaQueryData` has no such
+  /// field), so the row has to step below it on its own. The *display* size identifies an iPad,
+  /// not `MediaQuery.sizeOf`, which in windowed mode reports the window and can be phone-sized.
+  ///
+  /// 56 is measured, not guessed: the pill grows on touch to window-relative y 10..51.5pt, and the
+  /// safe-area top there is only ~9pt, so anything under 43 puts the row back under the expanded
+  /// pill. On a full-screen iPad the pill is hidden and this is dead space at the top instead.
+  static double _menuBarTop(BuildContext context) {
+    if (defaultTargetPlatform != TargetPlatform.iOS) return 8;
+    final display = View.of(context).display;
+    final isTablet = display.size.shortestSide / display.devicePixelRatio >= 600;
+    return isTablet ? 56 : 8;
   }
 
   Widget _menuButton(String title, List<Widget> children) {
@@ -379,7 +412,9 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
   Widget _infoCard() {
     final error = _controller.errorMessage;
     return Positioned(
-      top: 100,
+      // Hangs off the menu bar rather than off the top, so the iPad's extra offset carries through
+      // instead of letting the bar clip the card's top corners.
+      top: _menuBarTop(context) + 92,
       left: 16,
       child: Container(
         constraints: const BoxConstraints(maxWidth: 340),
