@@ -49,6 +49,14 @@ jobs:
     # path. Revisit when Ubuntu ships WPE again or the plugin grows a non-WPE Linux backend — this
     # image will age out first.
     runs-on: ubuntu-22.04
+    # The plugin also appends -Wno-deprecated-literal-operator to CMAKE_CXX_FLAGS globally
+    # (its linux/CMakeLists.txt:167), a flag clang only learned in 18 — jammy ships 14. Our own
+    # runner target compiles with -Wall -Werror (flutter_app/linux/CMakeLists.txt:44), so the
+    # unknown flag becomes -Wunknown-warning-option and then a hard error. CMake seeds
+    # CMAKE_CXX_FLAGS from CXXFLAGS at first configure, which puts this ahead of the plugin's
+    # append, and it only tolerates unknown -W flags — real warnings still fail the build.
+    env:
+      CXXFLAGS: -Wno-unknown-warning-option
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
