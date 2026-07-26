@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import 'src/tokens.dart';
 import 'src/viewer_page.dart';
 
 Future<void> main() async {
@@ -28,7 +29,7 @@ class MolApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0072B2),
+          seedColor: ChromeTokens.seed,
           brightness: Brightness.dark,
         ),
       ),

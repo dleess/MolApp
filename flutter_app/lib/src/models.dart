@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
+import 'tokens.dart';
+
 /// Enum names are the wire format: they are what viewer.html reads, so renaming a value renames
 /// the protocol. The `models_test` name assertions are what holds that contract in place.
 
@@ -94,7 +96,7 @@ class MolAppObject {
 
   /// Swatch color for the Objects panel. No explicit color means Mol* is coloring by chain, which
   /// the panel shows as a neutral dot rather than pretending it is white.
-  Color get swatchColor => colorFromHex(colorHex) ?? Colors.white.withValues(alpha: 0.3);
+  Color get swatchColor => colorFromHex(colorHex) ?? ChromeTokens.swatchFallback;
 
   @override
   bool operator ==(Object other) =>
