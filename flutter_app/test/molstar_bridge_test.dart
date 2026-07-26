@@ -1,0 +1,325 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:molapp/src/models.dart';
+import 'package:molapp/src/molstar_bridge.dart';
+
+/// Captures the scripts the bridge would have evaluated, so command encoding and the pending-script
+/// queue can be asserted without a webview.
+class FakeJsRunner implements MolStarJsRunner {
+  final List<String> evaluated = <String>[];
+  Object? asyncResult;
+  Object? asyncError;
+
+  @override
+  Future<void> evaluate(String source) async => evaluated.add(source);
+
+  @override
+  Future<Object?> callAsync(String source) async {
+    if (asyncError != null) throw StateError(asyncError.toString());
+    return asyncResult;
+  }
+
+  /// The `payload` of the nth `handleNativeCommand(...)` script, decoded.
+  Map<String, dynamic> envelopeAt(int index) {
+    final script = evaluated[index];
+    final start = script.indexOf('(') + 1;
+    final end = script.lastIndexOf('); void 0;');
+    return jsonDecode(script.substring(start, end)) as Map<String, dynamic>;
+  }
+}
+
+MolStarBridge readyBridge(FakeJsRunner runner) {
+  final bridge = MolStarBridge()..attach(runner);
+  bridge.receiveMessage(<String, dynamic>{'event': 'viewerReady'});
+  return bridge;
+}
+
+void main() {
+  group('MolStarCommandResult', () {
+    test('decodes a known command', () {
+      final result = MolStarCommandResult.fromJson(
+        jsonDecode('{"id":"1","command":"loadPdbId","success":true,"label":"1ABC"}')
+            as Map<String, dynamic>,
+      );
+      expect(result.id, '1');
+      expect(result.command, MolStarCommand.loadPdbId);
+      expect(result.success, isTrue);
+      expect(result.error, isNull);
+      expect(result.label, '1ABC');
+    });
+
+    test('keeps the failure message for an unknown command', () {
+      final result = MolStarCommandResult.fromJson(
+        jsonDecode('{"id":"2","command":"unknownCommand","success":false,'
+            '"error":"Unknown MolApp command: unknownCommand"}') as Map<String, dynamic>,
+      );
+      expect(result.id, '2');
+      expect(result.command, isNull);
+      expect(result.success, isFalse);
+      expect(result.error, 'Unknown MolApp command: unknownCommand');
+      expect(result.label, isNull);
+    });
+  });
+
+  group('viewer lifecycle', () {
+    test('tracks ready and error events', () {
+      final bridge = MolStarBridge();
+      expect(bridge.isViewerReady, isFalse);
+
+      bridge.receiveMessage(<String, dynamic>{'event': 'viewerReady'});
+      expect(bridge.isViewerReady, isTrue);
+
+      bridge.receiveMessage(
+        <String, dynamic>{'event': 'viewerError', 'message': 'Recoverable', 'fatal': false},
+      );
+      expect(bridge.isViewerReady, isTrue);
+      expect(bridge.lastErrorMessage, 'Recoverable');
+
+      bridge.receiveMessage(
+        <String, dynamic>{'event': 'viewerError', 'message': 'Fatal', 'fatal': true},
+      );
+      expect(bridge.isViewerReady, isFalse);
+      expect(bridge.lastErrorMessage, 'Fatal');
+    });
+
+    test('holds commands until the viewer is ready, then flushes in order', () {
+      final runner = FakeJsRunner();
+      final bridge = MolStarBridge()..attach(runner);
+
+      bridge.loadPdbId('1CRN');
+      bridge.focusSelection();
+      expect(runner.evaluated, isEmpty);
+
+      bridge.receiveMessage(<String, dynamic>{'event': 'viewerReady'});
+      expect(runner.evaluated, hasLength(2));
+      expect(runner.envelopeAt(0)['command'], 'loadPdbId');
+      expect(runner.envelopeAt(1)['command'], 'focusSelection');
+    });
+
+    test('drops queued commands after a fatal error instead of growing forever', () {
+      final runner = FakeJsRunner();
+      final bridge = MolStarBridge()..attach(runner);
+
+      bridge.loadPdbId('1CRN');
+      bridge.receiveMessage(
+        <String, dynamic>{'event': 'viewerError', 'message': 'Fatal', 'fatal': true},
+      );
+      bridge.loadLocalStructure(data: 'ATOM', format: 'pdb', label: 'x.pdb');
+
+      bridge.receiveMessage(<String, dynamic>{'event': 'viewerReady'});
+      expect(runner.evaluated, isEmpty);
+    });
+  });
+
+  group('command encoding', () {
+    test('wraps every command in an id/command/payload envelope', () {
+      final runner = FakeJsRunner();
+      final bridge = readyBridge(runner);
+
+      bridge.setRepresentation('surface', targets: <String>['1CRN']);
+      final envelope = runner.envelopeAt(0);
+
+      expect(envelope['command'], 'setRepresentation');
+      expect(envelope['id'], isA<String>());
+      expect(envelope['payload'], <String, dynamic>{
+        'representation': 'surface',
+        'targets': <String>['1CRN'],
+      });
+      expect(runner.evaluated.first, startsWith('window.molapp.handleNativeCommand('));
+    });
+
+    test('gives each command a distinct id', () {
+      final runner = FakeJsRunner();
+      final bridge = readyBridge(runner);
+      bridge.undo();
+      bridge.redo();
+      expect(runner.envelopeAt(0)['id'], isNot(runner.envelopeAt(1)['id']));
+    });
+
+    test('sends a null colorHex explicitly so JS resets to chain colouring', () {
+      final runner = FakeJsRunner();
+      final bridge = readyBridge(runner);
+      bridge.setObjectColor(name: '1CRN', colorHex: null);
+      final payload = runner.envelopeAt(0)['payload'] as Map<String, dynamic>;
+      expect(payload.containsKey('colorHex'), isTrue);
+      expect(payload['colorHex'], isNull);
+    });
+
+    test('omits the measure kind when leaving measure mode', () {
+      final runner = FakeJsRunner();
+      final bridge = readyBridge(runner);
+      bridge.setMeasureMode(false);
+      final payload = runner.envelopeAt(0)['payload'] as Map<String, dynamic>;
+      expect(payload, <String, dynamic>{'enabled': false});
+    });
+
+    test('encodes an expression selection with its AST', () {
+      final runner = FakeJsRunner();
+      final bridge = readyBridge(runner);
+      bridge.setSelection(const MoleculeSelection(
+        type: 'expression',
+        label: 'sele: chain A',
+        ast: SelectionAST(kind: SelectionASTKind.chain, value: 'A'),
+      ));
+      expect(runner.envelopeAt(0)['payload'], <String, dynamic>{
+        'type': 'expression',
+        'label': 'sele: chain A',
+        'ast': <String, dynamic>{'kind': 'chain', 'value': 'A'},
+      });
+    });
+
+    test('escapes structure text so a quote cannot break out of the script', () {
+      final runner = FakeJsRunner();
+      final bridge = readyBridge(runner);
+      bridge.loadLocalStructure(data: 'REMARK "quoted"\nATOM', format: 'pdb', label: 'a"b.pdb');
+      final payload = runner.envelopeAt(0)['payload'] as Map<String, dynamic>;
+      expect(payload['data'], 'REMARK "quoted"\nATOM');
+      expect(payload['label'], 'a"b.pdb');
+    });
+  });
+
+  group('feature visibility', () {
+    test('accumulates single toggles and is replaced wholesale by objectsReplaced', () {
+      final bridge = MolStarBridge();
+      bridge.receiveMessage(
+        <String, dynamic>{'event': 'featureVisibility', 'feature': 'water', 'isVisible': false},
+      );
+      bridge.receiveMessage(
+        <String, dynamic>{'event': 'featureVisibility', 'feature': 'ligand', 'isVisible': false},
+      );
+      expect(bridge.featureVisibility, <String, bool>{'water': false, 'ligand': false});
+
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'objectsReplaced',
+        'objects': <dynamic>[],
+        'visibility': <String, dynamic>{},
+      });
+      expect(bridge.featureVisibility, isEmpty);
+    });
+  });
+
+  group('selection events', () {
+    test('receives a selectionChanged event', () {
+      final bridge = MolStarBridge();
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'selectionChanged',
+        'selection': <String, dynamic>{
+          'type': 'atom',
+          'label': 'GLY A 1 CA',
+          'model': 1,
+          'chain': 'A',
+          'residueNumber': 1,
+          'atomName': 'CA',
+        },
+      });
+
+      final selection = bridge.currentSelection!;
+      expect(selection.type, 'atom');
+      expect(selection.label, 'GLY A 1 CA');
+      expect(selection.model, 1);
+      expect(selection.chain, 'A');
+      expect(selection.residueNumber, 1);
+      expect(selection.atomName, 'CA');
+    });
+
+    test('clears the selection when JS reports a null selection', () {
+      final bridge = MolStarBridge();
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'selectionChanged',
+        'selection': <String, dynamic>{'type': 'atom', 'label': 'GLY A 1 CA'},
+      });
+      bridge.receiveMessage(<String, dynamic>{'event': 'selectionChanged', 'selection': null});
+      expect(bridge.currentSelection, isNull);
+    });
+  });
+
+  group('objects', () {
+    test('appends a new object', () {
+      final bridge = MolStarBridge()
+        ..addObject(const MolAppObject(name: '1crn', type: MolAppObjectType.structure));
+      expect(bridge.objects, hasLength(1));
+      expect(bridge.objects[0].name, '1crn');
+    });
+
+    test('updates an existing object rather than duplicating it', () {
+      final bridge = MolStarBridge()
+        ..addObject(const MolAppObject(name: '1crn', type: MolAppObjectType.structure))
+        ..addObject(const MolAppObject(
+          name: '1crn',
+          type: MolAppObjectType.structure,
+          representation: ObjectRepresentation.surface,
+        ));
+      expect(bridge.objects, hasLength(1));
+      expect(bridge.objects[0].representation, ObjectRepresentation.surface);
+    });
+
+    test('keeps the selection type', () {
+      final bridge = MolStarBridge()
+        ..addObject(const MolAppObject(name: 'mysel', type: MolAppObjectType.selection));
+      expect(bridge.objects[0].type, MolAppObjectType.selection);
+    });
+
+    test('objectsReplaced rebuilds the panel with defaults per object type', () {
+      final bridge = MolStarBridge();
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'objectsReplaced',
+        'objects': <dynamic>[
+          <String, dynamic>{'name': '1CRN', 'type': 'structure'},
+          <String, dynamic>{
+            'name': 'NAP',
+            'type': 'selection',
+            'isVisible': false,
+            'colorHex': '#D55E00',
+          },
+        ],
+        'visibility': <String, dynamic>{'water': false},
+      });
+
+      expect(bridge.objects, hasLength(2));
+      expect(bridge.objects[0].representation, ObjectRepresentation.ribbon);
+      expect(bridge.objects[1].representation, ObjectRepresentation.ballAndStick);
+      expect(bridge.objects[1].isVisible, isFalse);
+      expect(bridge.objects[1].colorHex, '#D55E00');
+      expect(bridge.featureVisibility, <String, bool>{'water': false});
+    });
+
+    test('objectsVisibility mirrors the master ligand toggle onto the rows', () {
+      final bridge = MolStarBridge()
+        ..addObject(const MolAppObject(name: 'NAP', type: MolAppObjectType.selection));
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'objectsVisibility',
+        'items': <dynamic>[
+          <String, dynamic>{'name': 'NAP', 'isVisible': false},
+        ],
+      });
+      expect(bridge.objects[0].isVisible, isFalse);
+    });
+
+    test('visibleStructureNames scopes global actions to shown structures', () {
+      final bridge = MolStarBridge();
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'objectsReplaced',
+        'objects': <dynamic>[
+          <String, dynamic>{'name': '1CRN', 'type': 'structure', 'isVisible': true},
+          <String, dynamic>{'name': '4HHB', 'type': 'structure', 'isVisible': false},
+          <String, dynamic>{'name': 'sele', 'type': 'selection', 'isVisible': true},
+        ],
+      });
+      expect(bridge.visibleStructureNames, <String>['1CRN']);
+    });
+  });
+
+  group('async calls', () {
+    test('serializeState returns null without a runner', () async {
+      expect(await MolStarBridge().serializeState(), isNull);
+    });
+
+    test('captureImageDataURL surfaces a JS error instead of throwing', () async {
+      final runner = FakeJsRunner()..asyncError = 'canvas is gone';
+      final bridge = readyBridge(runner);
+      expect(await bridge.captureImageDataURL(), isNull);
+      expect(bridge.lastErrorMessage, contains('canvas is gone'));
+    });
+  });
+}

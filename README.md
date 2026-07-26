@@ -1,24 +1,55 @@
 # MolApp
 
-Native iPadOS SwiftUI molecule viewer scaffold.
+Mol\*-powered molecule viewer.
+
+There are three shells in this repo over one shared web core:
+
+| Directory | Shell | Targets |
+| --- | --- | --- |
+| **`flutter_app/`** | **Flutter / Dart** | **iOS, Android, macOS, Windows, Linux** |
+| `MolApp/` | SwiftUI | iPadOS / iOS |
+| `android/` | Jetpack Compose | Android |
+
+**`flutter_app/` is the one to work in** — it covers every platform from a single codebase. See
+[`flutter_app/README.md`](flutter_app/README.md) for setup, per-platform requirements and known
+gaps. The two native shells are kept as the reference implementations the Flutter port was checked
+against; they still build.
+
+## The shared web core
+
+`MolApp/Resources/viewer.html` plus `MolApp/Resources/molstar/` are the actual viewer, and are the
+**single source of truth for all three shells**. Edit only that copy:
+
+- Android copies it at build time (`copyWebAssets` in `android/app/build.gradle`).
+- Flutter copies it with `dart run tool/sync_web_assets.dart`.
+- iOS bundles it directly as a target resource.
+
+The shells talk to it over one JSON protocol: `window.molapp.handleNativeCommand({id, command,
+payload})` in, command results and events back out.
 
 ## Build
 
-Build the app for the iPad simulator:
-
 ```sh
+# Flutter — all five platforms
+cd flutter_app && flutter pub get && dart run tool/sync_web_assets.dart
+flutter run -d macos            # or windows / linux / an android or ios device
+
+# SwiftUI (iPad)
 xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' build CODE_SIGNING_ALLOWED=NO
+
+# Compose (Android)
+cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleDebug
 ```
 
 ## Apple Pencil
 
-- **Hover residue tooltip** (done): hovering the Pencil over an atom/residue shows its identity
-  label near the cursor before selection. Requires a physical iPad + Apple Pencil — the Simulator
-  does not emit hover events.
-- **Distance / angle / dihedral measurement** (done): Measure ▸ Distance / Angle / Dihedral Mode,
-  then tap 2 / 3 / 4 atoms with the Pencil to draw the measurement (Å or °) between them. Atom-level
-  picking; tap more sets to add, or Clear Measurements to remove. Also available as the `measure`,
-  `measure angle`, `measure dihedral`, and `measure clear` commands.
+- **Hover residue tooltip**: hovering the Pencil over an atom/residue shows its identity label near
+  the cursor before selection. Requires a physical iPad + Apple Pencil — the Simulator does not emit
+  hover events. On desktop the same tooltip follows the mouse.
+- **Distance / angle / dihedral measurement**: Measure ▸ Distance / Angle / Dihedral Mode, then pick
+  2 / 3 / 4 atoms to draw the measurement (Å or °) between them. Atom-level picking; pick more sets
+  to add, or Clear Measurements to remove. Also available as the `measure`, `measure angle`,
+  `measure dihedral`, and `measure clear` commands.
 
 Still planned:
 

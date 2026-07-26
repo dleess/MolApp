@@ -1,0 +1,744 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import 'manual_page.dart';
+import 'models.dart';
+import 'molstar_bridge.dart';
+import 'molstar_web_view.dart';
+import 'viewer_controller.dart';
+
+class MoleculeViewerPage extends StatefulWidget {
+  const MoleculeViewerPage({super.key, this.viewportBuilder});
+
+  /// The Mol* viewport. Overridden by widget tests, which have no platform webview to embed;
+  /// everything else in this page is then exercised exactly as it ships.
+  final Widget Function(MolStarBridge bridge)? viewportBuilder;
+
+  @override
+  State<MoleculeViewerPage> createState() => _MoleculeViewerPageState();
+}
+
+class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
+  late final MolStarBridge _bridge;
+  late final ViewerController _controller;
+  final TextEditingController _pdbField = TextEditingController();
+  final TextEditingController _commandField = TextEditingController();
+  bool _isObjectsPanelExpanded = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _bridge = MolStarBridge();
+    _controller = ViewerController(_bridge)..addListener(_syncTextFields);
+  }
+
+  /// The controller rewrites both fields on its own (normalising a PDB id, clearing the command
+  /// bar after a run), so mirror it back into the editing controllers.
+  void _syncTextFields() {
+    if (_pdbField.text != _controller.pdbText) {
+      _pdbField.value = TextEditingValue(
+        text: _controller.pdbText,
+        selection: TextSelection.collapsed(offset: _controller.pdbText.length),
+      );
+    }
+    if (_commandField.text != _controller.commandText) {
+      _commandField.value = TextEditingValue(
+        text: _controller.commandText,
+        selection: TextSelection.collapsed(offset: _controller.commandText.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller
+      ..removeListener(_syncTextFields)
+      ..dispose();
+    _bridge.dispose();
+    _pdbField.dispose();
+    _commandField.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0B0F14),
+      body: AnimatedBuilder(
+        animation: Listenable.merge(<Listenable>[_bridge, _controller]),
+        child: widget.viewportBuilder?.call(_bridge) ?? MolStarWebView(bridge: _bridge),
+        builder: (context, viewport) {
+          final isCompact = MediaQuery.sizeOf(context).width < 700;
+          final tooltip = _hoverTooltip();
+          final banner = _measureBanner();
+          // StackFit.expand is load-bearing: Scaffold hands its body loose constraints, and every
+          // overlay here is Positioned, so a loose Stack would collapse to zero and the viewport
+          // with it.
+          return Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              viewport!,
+              _menuBar(isCompact: isCompact),
+              _infoCard(),
+              _objectsPanel(),
+              _commandBar(),
+              ?banner,
+              ?tooltip,
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // MARK: - Overlays
+
+  Widget? _hoverTooltip() {
+    final label = _bridge.hoverLabel;
+    final point = _bridge.hoverPoint;
+    if (label == null || point == null) return null;
+    return Positioned(
+      left: point.dx,
+      top: (point.dy - 28).clamp(16.0, double.infinity),
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.8),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget? _measureBanner() {
+    final kind = _controller.measureKind;
+    if (kind == null) return null;
+    // Name the atoms already armed rather than only counting down. "Remembering" a stale pick was
+    // impossible to tell apart from a fresh start while the picks were invisible; spelling them out
+    // makes a leftover obvious at a glance, and clicking empty space clears it.
+    final picked = _bridge.measurePendingLabels;
+    final remaining = kind.atomCount - _bridge.measurePendingCount;
+    final text = picked.isEmpty
+        ? '${kind.title} mode — pick ${kind.atomCount} atoms'
+        : '${kind.title} mode — ${picked.join(', ')} '
+            '(pick $remaining more)';
+    return Positioned(
+      top: 60,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.blue.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const Icon(Icons.straighten, size: 14, color: Colors.white),
+                const SizedBox(width: 6),
+                Text(
+                  text,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // MARK: - Menu bar
+
+  Widget _menuBar({required bool isCompact}) {
+    // A wide window has room for all six menus in a row; a narrow one does not, so scroll them
+    // horizontally instead of letting the row overflow and clip.
+    final menus = <Widget>[
+      _fileMenu(),
+      _editMenu(),
+      _displayMenu(),
+      _calculationMenu(),
+      _measureMenu(),
+      _helpMenu(),
+    ];
+
+    return Positioned(
+      top: 8,
+      left: 0,
+      right: 0,
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.68),
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: isCompact
+            ? SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(children: menus),
+              )
+            : Padding(
+                padding: const EdgeInsets.only(left: 16, right: 14),
+                child: Row(children: menus),
+              ),
+      ),
+    );
+  }
+
+  Widget _menuButton(String title, List<Widget> children) {
+    return MenuAnchor(
+      menuChildren: children,
+      builder: (context, controller, child) => TextButton(
+        onPressed: () => controller.isOpen ? controller.close() : controller.open(),
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+        child: Text(title),
+      ),
+    );
+  }
+
+  MenuItemButton _item(
+    String label,
+    IconData icon,
+    VoidCallback? onPressed, {
+    bool destructive = false,
+  }) {
+    return MenuItemButton(
+      onPressed: onPressed,
+      leadingIcon: Icon(icon, size: 18, color: destructive ? Colors.red : null),
+      style: destructive ? MenuItemButton.styleFrom(foregroundColor: Colors.red) : null,
+      child: Text(label),
+    );
+  }
+
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
+        ),
+      ),
+    );
+  }
+
+  Widget _fileMenu() {
+    final hasObjects = _bridge.objects.isNotEmpty;
+    return _menuButton('File', <Widget>[
+      _item('Open Structure', Icons.folder_open, _controller.openStructure),
+      _item(
+        'Load PDB ID',
+        Icons.download_outlined,
+        _controller.pdbText.trim().isEmpty ? null : _controller.loadPdb,
+      ),
+      const Divider(height: 8),
+      _item('Save State (.molapp)', Icons.save_outlined, hasObjects ? _controller.saveState : null),
+      _item('Open State (.molapp)', Icons.folder_special_outlined, _controller.openState),
+      const Divider(height: 8),
+      SubmenuButton(
+        leadingIcon: const Icon(Icons.image_outlined, size: 18),
+        menuChildren: <Widget>[
+          for (final format in ExportFormat.values)
+            MenuItemButton(
+              onPressed: hasObjects ? () => _controller.exportImage(format) : null,
+              child: Text(format.title),
+            ),
+        ],
+        child: const Text('Export Display'),
+      ),
+      _item('Print', Icons.print_outlined, hasObjects ? _controller.printDisplay : null),
+      const Divider(height: 8),
+      _item('Reset All', Icons.restart_alt, _controller.resetAll, destructive: true),
+    ]);
+  }
+
+  Widget _editMenu() {
+    return _menuButton('Edit', <Widget>[
+      _item('Undo', Icons.undo, () {
+        _controller.clearError();
+        _bridge.undo();
+      }),
+      _item('Redo', Icons.redo, () {
+        _controller.clearError();
+        _bridge.redo();
+      }),
+      const Divider(height: 8),
+      _item('Clear Selection', Icons.highlight_off, () {
+        _controller.clearError();
+        _bridge.clearSelection();
+      }),
+    ]);
+  }
+
+  Widget _displayMenu() {
+    final canRepresent = _controller.visibleStructureNames.isNotEmpty;
+    return _menuButton('Display', <Widget>[
+      _sectionLabel('Representation'),
+      for (final representation in MoleculeRepresentation.values)
+        _item(
+          representation.title,
+          representation.icon,
+          canRepresent ? () => _controller.setRepresentation(representation) : null,
+        ),
+      _sectionLabel('Visibility'),
+      for (final feature in MoleculeVisibilityFeature.values)
+        _item(
+          '${(_controller.visibilityStates[feature] ?? true) ? 'Hide' : 'Show'} ${feature.title}',
+          feature.icon,
+          () => _controller.toggleVisibility(feature),
+        ),
+      _sectionLabel('Background'),
+      for (final preset in backgroundPresets)
+        MenuItemButton(
+          onPressed: () => _controller.setBackground(preset),
+          leadingIcon: Container(
+            width: 16,
+            height: 16,
+            decoration: BoxDecoration(
+              color: colorFromHex(preset.hex),
+              border: Border.all(color: Colors.grey.withValues(alpha: 0.6)),
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+          child: Text(preset.title),
+        ),
+    ]);
+  }
+
+  Widget _calculationMenu() {
+    final visible = _controller.visibleStructureNames;
+    return _menuButton('Calculation', <Widget>[
+      _item(
+        'Surface Potential',
+        Icons.bolt_outlined,
+        visible.isEmpty ? null : _controller.surfacePotential,
+      ),
+      _item(
+        'Secondary Structure',
+        Icons.show_chart,
+        visible.isEmpty ? null : _controller.secondaryStructure,
+      ),
+      _item(
+        'Superpose Visible',
+        Icons.filter_none,
+        visible.length < 2 ? null : _controller.superpose,
+      ),
+      _sectionLabel('Morph'),
+      _item(
+        _controller.isMorphing ? 'Stop Morph' : 'Start Morph',
+        _controller.isMorphing ? Icons.stop_circle_outlined : Icons.play_circle_outline,
+        !_controller.isMorphing && visible.isEmpty ? null : _controller.morphToggle,
+      ),
+    ]);
+  }
+
+  Widget _measureMenu() {
+    return _menuButton('Measure', <Widget>[
+      for (final kind in MeasureKind.values)
+        _item(
+          '${kind.title} Mode',
+          _controller.measureKind == kind ? Icons.straighten : Icons.straighten_outlined,
+          () => _controller.toggleMeasure(kind),
+        ),
+      _item('Clear Measurements', Icons.delete_outline, _controller.clearMeasurements),
+    ]);
+  }
+
+  Widget _helpMenu() {
+    return _menuButton('Help', <Widget>[
+      _item('Manual', Icons.menu_book_outlined, () {
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const ManualPage()),
+        );
+      }),
+      _item('Quick Help', Icons.help_outline, () {
+        _controller.updateStatus('Open a PDB/mmCIF file or enter a PDB ID');
+      }),
+    ]);
+  }
+
+  // MARK: - Info card
+
+  Widget _infoCard() {
+    final error = _controller.errorMessage;
+    return Positioned(
+      top: 100,
+      left: 16,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 340),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(
+              'Molecule Viewer',
+              style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _controller.statusMessage,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 13),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _controller.openStructure,
+              icon: const Icon(Icons.folder_open, size: 18),
+              label: const Text('Open Structure'),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                SizedBox(
+                  width: 108,
+                  height: 38,
+                  child: TextField(
+                    controller: _pdbField,
+                    onChanged: _controller.setPdbText,
+                    onSubmitted: (_) => _controller.loadPdb(),
+                    textCapitalization: TextCapitalization.characters,
+                    autocorrect: false,
+                    inputFormatters: <TextInputFormatter>[
+                      LengthLimitingTextInputFormatter(4),
+                      FilteringTextInputFormatter.allow(RegExp('[A-Za-z0-9]')),
+                    ],
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    decoration: const InputDecoration(
+                      hintText: 'PDB ID',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _controller.pdbText.trim().isEmpty ? null : _controller.loadPdb,
+                  icon: const Icon(Icons.download_outlined, size: 18),
+                  label: const Text('Load PDB'),
+                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                ),
+              ],
+            ),
+            if (error != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                error,
+                style: TextStyle(color: Colors.red.withValues(alpha: 0.9), fontSize: 12),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // MARK: - Objects panel
+
+  Widget _objectsPanel() {
+    final objects = _bridge.objects;
+    return Positioned(
+      left: 16,
+      bottom: 120,
+      child: Container(
+        width: 220,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.65),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            InkWell(
+              onTap: () => setState(() => _isObjectsPanelExpanded = !_isObjectsPanelExpanded),
+              child: Row(
+                children: <Widget>[
+                  const Icon(Icons.layers_outlined, size: 16, color: Colors.white),
+                  const SizedBox(width: 6),
+                  const Expanded(
+                    child: Text(
+                      'Objects',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    _isObjectsPanelExpanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16,
+                    color: Colors.white,
+                  ),
+                ],
+              ),
+            ),
+            if (_isObjectsPanelExpanded)
+              if (objects.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'No objects',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  // The panel is an overlay on the viewport; a long ligand list must scroll inside
+                  // it rather than push the command bar off screen.
+                  constraints: const BoxConstraints(maxHeight: 260),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        for (final object in objects) ...<Widget>[
+                          _objectRow(object),
+                          if (object != objects.last)
+                            Divider(height: 10, color: Colors.white.withValues(alpha: 0.15)),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _objectRow(MolAppObject object) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              InkWell(
+                onTap: () => _bridge.setObjectVisibility(
+                  name: object.name,
+                  isVisible: !object.isVisible,
+                ),
+                child: Icon(
+                  object.isVisible ? Icons.visibility : Icons.visibility_off,
+                  size: 15,
+                  color: object.isVisible ? Colors.white : Colors.white.withValues(alpha: 0.35),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      object.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      object.type.name,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.45),
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _colorSwatch(object),
+            ],
+          ),
+          const SizedBox(height: 5),
+          // Wrap, not Row: five labels plus their padding are a hair wider than the panel's 200pt
+          // of content at the default text scale, and wider still when the user scales text up.
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: <Widget>[
+              for (final repr in ObjectRepresentation.values)
+                InkWell(
+                  onTap: () => _bridge.setObjectRepresentation(
+                    name: object.name,
+                    representation: repr,
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: object.representation == repr
+                          ? Colors.white.withValues(alpha: 0.25)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(
+                      repr.shortTitle,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                        color: object.representation == repr
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _colorSwatch(MolAppObject object) {
+    return MenuAnchor(
+      menuChildren: <Widget>[
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: SizedBox(
+            width: 190,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text('Color', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    for (final key in colorPickerKeys)
+                      _colorDot(
+                        object.name,
+                        key,
+                        key == 'default' ? null : namedColors[key],
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+      builder: (context, controller, child) => InkWell(
+        onTap: () => controller.isOpen ? controller.close() : controller.open(),
+        child: Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: object.swatchColor,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 0.5),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _colorDot(String objectName, String key, String? hex) {
+    return Tooltip(
+      message: key,
+      child: InkWell(
+        onTap: () {
+          _bridge.setObjectColor(name: objectName, colorHex: hex);
+          Navigator.of(context, rootNavigator: false).maybePop();
+        },
+        child: Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            color: colorFromHex(hex) ?? Colors.grey.withValues(alpha: 0.4),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 0.5),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // MARK: - Command bar
+
+  Widget _commandBar() {
+    final hasText = _controller.commandText.trim().isNotEmpty;
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 24,
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 600),
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.75),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.terminal, size: 18, color: Colors.white.withValues(alpha: 0.6)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _commandField,
+                  onChanged: _controller.setCommandText,
+                  onSubmitted: (_) => _controller.executeCommand(),
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: 'Enter command (e.g. load 1crn, repr surface)...',
+                    hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 14),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                ),
+              ),
+              if (hasText)
+                IconButton(
+                  onPressed: () => _controller.setCommandText(''),
+                  icon: Icon(Icons.cancel, size: 18, color: Colors.white.withValues(alpha: 0.6)),
+                  tooltip: 'Clear',
+                ),
+              IconButton(
+                onPressed: hasText ? _controller.executeCommand : null,
+                icon: Icon(
+                  Icons.arrow_circle_up,
+                  size: 22,
+                  color: hasText ? Colors.blue : Colors.white.withValues(alpha: 0.3),
+                ),
+                tooltip: 'Run command',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

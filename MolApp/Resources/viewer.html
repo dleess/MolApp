@@ -81,8 +81,14 @@
       // @JavascriptInterface that only accepts strings, so it gets a JSON string. Native->JS is the
       // same on both (evaluateJavaScript of window.molapp.handleNativeCommand), so only this direction
       // needs a shim.
+      //
+      // The Flutter app installs window.molappPostMessage (a JSON-string sink) before this page runs
+      // and is checked first: on macOS/iOS its webview is also a WKWebView, so leaving the webkit
+      // branch first would only work if the host happened to name its handler "molapp".
       function postToNative(obj) {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
+        if (typeof window.molappPostMessage === 'function') {
+          window.molappPostMessage(JSON.stringify(obj));
+        } else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.molapp) {
           window.webkit.messageHandlers.molapp.postMessage(obj);
         } else if (window.MolAppAndroid && typeof window.MolAppAndroid.postMessage === 'function') {
           window.MolAppAndroid.postMessage(JSON.stringify(obj));
@@ -172,25 +178,79 @@
         return result;
       }
 
-      // Mol* has no standalone "stick" representation. Sticks-only = ball-and-stick with the
-      // element-sphere visual removed, so Stick differs from Ball+Stick (which keeps the spheres).
+      // Okabe–Ito: the colourblind-safe palette this app draws everything in.
+      const OKABE_ITO = {
+        black:      0x000000,
+        orange:     0xE69F00,
+        skyBlue:    0x56B4E9,
+        green:      0x009E73,
+        yellow:     0xF0E442,
+        blue:       0x0072B2,
+        vermillion: 0xD55E00,
+        purple:     0xCC79A7
+      };
+
+      // Mol* draws measurement text in black, which on this near-black viewport is all but
+      // invisible. Yellow is the highest-luminance colour in the palette, so the value stays
+      // readable against the background and against the structure; the black backdrop keeps it
+      // legible where it crosses a pale atom. Orange carries the line, arc and vectors without
+      // colliding with the blue that marks selections.
+      const MEASUREMENT_TEXT_PARAMS = {
+        textColor: OKABE_ITO.yellow,
+        textSize: 0.9,
+        background: true,
+        backgroundColor: OKABE_ITO.black,
+        backgroundOpacity: 0.65,
+        borderWidth: 0.2,
+        borderColor: OKABE_ITO.black
+      };
+      // Distance names its line colour `linesColor`; angle and dihedral colour their vectors, arc
+      // and sector from a single `color`.
+      const MEASUREMENT_OPTIONS = {
+        distance: {
+          lineParams: { linesColor: OKABE_ITO.orange, linesSize: 0.1 },
+          labelParams: MEASUREMENT_TEXT_PARAMS
+        },
+        angle: {
+          lineParams: { color: OKABE_ITO.orange },
+          labelParams: MEASUREMENT_TEXT_PARAMS
+        },
+        dihedral: {
+          lineParams: { color: OKABE_ITO.orange },
+          labelParams: MEASUREMENT_TEXT_PARAMS
+        }
+      };
+
+      // Mol* has no standalone "stick" representation, so both are ball-and-stick and the
+      // difference is how big the atom spheres are.
       const BALL_AND_STICK_VISUALS = ['element-sphere', 'intra-bond', 'inter-bond'];
-      const STICK_ONLY_VISUALS = ['intra-bond', 'inter-bond'];
+      // Stick keeps the spheres and shrinks them to the bond radius, so they read as stick caps
+      // rather than balls. Dropping the sphere visual outright — which is what Stick used to do —
+      // left nothing atom-shaped on screen to hit: every click in stick mode identified a bond, so
+      // picking an atom did nothing at all, while the same gesture worked in Ball+Stick.
+      const STICK_VISUALS = ['element-sphere', 'intra-bond', 'inter-bond'];
+      // sizeAspectRatio 1 gives the spheres and the bond cylinders the same radius. sizeFactor is
+      // ball-and-stick's default 0.15 times the aspect ratio it would otherwise apply to the bonds
+      // (0.67), so the sticks keep the thickness they have always had. The uniform size theme is
+      // what stops the spheres from taking van der Waals radii and turning back into balls.
+      const STICK_TYPE_PARAMS = { sizeAspectRatio: 1, sizeFactor: 0.1 };
+      const STICK_SIZE_THEME = { name: 'uniform' };
 
       // Force each component's atomic representation deterministically. The atomic-detail preset
       // auto-picks the repr type from structure heuristics — e.g. it renders spacefill (not
       // ball-and-stick) for NMR ensembles / low atoms-per-residue models like 1D3Z — so patching
       // "existing ball-and-stick visuals" silently no-ops and Stk/B+S come out as spheres. Rebuild
       // the repr explicitly (same clear+add path the selection code uses) so the type is exact:
-      //   stick        → ball-and-stick, bonds only (no element spheres)
+      //   stick        → ball-and-stick, spheres shrunk to the bond radius (stick caps)
       //   ballAndStick → ball-and-stick, spheres + bonds
       //   sphere       → spacefill (van der Waals)
       async function applyAtomicRepresentation(target, representation) {
         if (!target || !target.components) return;
         const plugin = window.molapp.viewer.plugin;
         const reprType = representation === 'sphere' ? 'spacefill' : 'ball-and-stick';
-        const typeParams = representation === 'stick'
-          ? { visuals: STICK_ONLY_VISUALS.slice() }
+        const isStick = representation === 'stick';
+        const typeParams = isStick
+          ? { visuals: STICK_VISUALS.slice(), ...STICK_TYPE_PARAMS }
           : representation === 'ballAndStick'
             ? { visuals: BALL_AND_STICK_VISUALS.slice() }
             : null;
@@ -198,7 +258,11 @@
           await clearComponentRepresentations(comp);
           await plugin.builders.structure.representation.addRepresentation(
             comp.cell,
-            { type: reprType, ...(typeParams ? { typeParams } : {}) }
+            {
+              type: reprType,
+              ...(typeParams ? { typeParams } : {}),
+              ...(isStick ? { sizeTheme: STICK_SIZE_THEME } : {})
+            }
           );
         }
       }
@@ -263,9 +327,38 @@
         await resetCamera();
       }
 
+      // Mol* focuses whatever you left-click — its own behavior, bound to plain primary click —
+      // and draws that residue plus everything around it in its own ball-and-stick visual. It is a
+      // different manager from lociSelects, so clearing the selection marks never touched it: the
+      // residue stayed lit long after the selection was gone, which reads as the app hanging onto
+      // something the user thought they had cleared.
+      function clearFocusVisual() {
+        if (!window.molapp || !window.molapp.viewer) return;
+        const focus = window.molapp.viewer.plugin.managers.structure.focus;
+        if (focus && typeof focus.clear === 'function') focus.clear();
+      }
+
+      // Every layer that can leave something looking selected, dropped together: the armed measure
+      // picks and their marks, MolApp's own selection and its overlay, and Mol*'s click focus.
+      function resetAllSelections() {
+        clearMeasurePending();
+        setMolAppSelection(null);
+        clearFocusVisual();
+      }
+
       function clearSelectionVisuals() {
         if (!window.molapp || !window.molapp.viewer) {
           return;
+        }
+
+        // Selection visuals and measure-pick marks are the same overlay, so wiping the marks here
+        // would otherwise leave half-finished picks armed and now invisible — the next atom picked
+        // silently pairs with a stale one. Every path that changes selection visuals routes
+        // through here, so dropping the picks alongside their marks closes all of them at once.
+        if (window.molapp.measureMode && window.molapp.measurePending
+            && window.molapp.measurePending.length) {
+          window.molapp.measurePending = [];
+          postMeasurePending();
         }
 
         const interactivity = window.molapp.viewer.plugin.managers.interactivity;
@@ -655,7 +748,7 @@
                 {
                   type: 'cartoon',
                   color: 'uniform',
-                  colorParams: { value: 0x0072B2 } // Okabe-Ito blue
+                  colorParams: { value: OKABE_ITO.blue }
                 }
               );
               window.molapp.objects[selName] = {
@@ -683,7 +776,7 @@
           }
         },
         clearSelection: async function () {
-          setMolAppSelection(null);
+          resetAllSelections();
         },
 
         setObjectVisibility: async function (payload) {
@@ -775,8 +868,9 @@
               sphere:       'spacefill'
             };
             const reprType = reprTypeMap[representation] || 'cartoon';
-            const typeParams = representation === 'stick'
-              ? { visuals: STICK_ONLY_VISUALS.slice() }
+            const isStick = representation === 'stick';
+            const typeParams = isStick
+              ? { visuals: STICK_VISUALS.slice(), ...STICK_TYPE_PARAMS }
               : representation === 'ballAndStick'
                 ? { visuals: BALL_AND_STICK_VISUALS.slice() }
                 : null;
@@ -794,12 +888,13 @@
             try {
               await clearComponentRepresentations(comp);
               const colorHex = obj.colorHex || null;
-              const colorVal = colorHex ? hexToMolStarColor(colorHex) : 0x0072B2; // Okabe-Ito blue
+              const colorVal = colorHex ? hexToMolStarColor(colorHex) : OKABE_ITO.blue;
               await plugin.builders.structure.representation.addRepresentation(
                 comp.cell,
                 {
                   type: reprType,
                   ...(typeParams ? { typeParams } : {}),
+                  ...(isStick ? { sizeTheme: STICK_SIZE_THEME } : {}),
                   color: 'uniform',
                   colorParams: { value: colorVal }
                 }
@@ -1024,19 +1119,26 @@
         setMeasureMode: async function (payload) {
           const enabled = Boolean(payload.enabled);
           const plugin = window.molapp.viewer.plugin;
-          clearMeasurePending();
-          window.molapp.measureKind = payload.kind || 'distance';
-          if (enabled && !window.molapp.measureMode) {
-            // Pick individual atoms (not whole residues) so measurements are atom-to-atom.
-            window.molapp.prevGranularity = plugin.managers.interactivity.props.granularity;
+          if (enabled) {
+            if (!window.molapp.measureMode) {
+              window.molapp.prevGranularity = plugin.managers.interactivity.props.granularity;
+            }
+            // Pick individual atoms (not whole residues) so measurements are atom-to-atom, and so
+            // the mark the user sees is the atom they clicked and not its whole residue.
             plugin.managers.interactivity.setProps({ granularity: 'element' });
-            // Picked atoms are marked with the same overlay a normal selection uses, so drop any
-            // standing selection — otherwise its mark is indistinguishable from a measure pick.
-            setMolAppSelection(null);
-          } else if (!enabled && window.molapp.measureMode) {
+          } else if (window.molapp.measureMode) {
             plugin.managers.interactivity.setProps({ granularity: window.molapp.prevGranularity || 'residue' });
           }
+          // Choosing a measurement mode starts from a clean slate, every time — not only on the
+          // off→on edge. Switching Distance→Angle, or picking the same mode again after a stray
+          // click, has to clear just as hard: anything still marked would otherwise pair with the
+          // next pick, or simply look like the app kept what was selected before measuring began.
+          resetAllSelections();
+          window.molapp.measureKind = payload.kind || 'distance';
           window.molapp.measureMode = enabled;
+          // resetAllSelections() posted against the previous kind, so re-post now that the new
+          // kind — and with it how many atoms this measurement needs — is in place.
+          postMeasurePending();
         },
         clearMeasurements: async function () {
           await clearMeasurementsInternal();
@@ -1970,11 +2072,26 @@
         postToNative({ event: 'measurement', label });
       }
 
+      // How many atoms are armed for the measurement being built. The pick marks alone are easy to
+      // miss on a large structure, so a half-finished pick used to be invisible state — the user
+      // could not tell an atom was already waiting to pair with their next tap, which reads as the
+      // app "remembering" something they thought they had left behind. Shells put this on screen.
+      function postMeasurePending() {
+        const pending = window.molapp.measurePending || [];
+        postToNative({
+          event: 'measurePending',
+          count: pending.length,
+          target: measureTargetCount(window.molapp.measureKind),
+          labels: pending.map(function (p) { return p.label; })
+        });
+      }
+
       // Atoms picked so far are marked in the structure until the measurement is drawn (or the
       // pending set is abandoned). Highlight alone is not enough: it only ever shows the newest
       // atom, and Mol* wipes that layer on the next hover event.
       function clearMeasurePending() {
         window.molapp.measurePending = [];
+        postMeasurePending();
         if (!window.molapp.viewer) return;
         const interactivity = window.molapp.viewer.plugin.managers.interactivity;
         interactivity.lociHighlights.clearHighlights();
@@ -1991,7 +2108,25 @@
       function handleMeasurePick(loci) {
         const SE = window.molstar && window.molstar.lib && window.molstar.lib.structure
           ? window.molstar.lib.structure.StructureElement : null;
-        if (!SE || !SE.Loci.is(loci) || SE.Loci.isEmpty(loci)) return;
+        // Mol*'s focus behavior fires on this same click and lights up the clicked residue plus
+        // everything around it. During a measurement that reads as a different thing getting
+        // selected on every pick, so drop it and leave the pick marks as the only thing on screen.
+        clearFocusVisual();
+        // A click on empty space cancels the picks collected so far, the same way it drops a normal
+        // selection outside measure mode. Returning early instead left a half-finished pick armed
+        // indefinitely: the user abandons it, picks the pair they actually want, and the stale atom
+        // silently pairs with the first of them — every later measurement then shifted by one,
+        // which reads as "it remembered what I picked before".
+        const hitNothing = !loci || loci.kind === 'empty-loci'
+          || (SE && SE.Loci.is(loci) && SE.Loci.isEmpty(loci));
+        if (hitNothing) {
+          clearMeasurePending();
+          return;
+        }
+        // A tap that lands on a bond rather than an atom — easy to do between two atoms in stick
+        // mode — is neither a pick nor an abandonment, so leave the picks collected so far alone
+        // instead of silently throwing them away.
+        if (!SE || !SE.Loci.is(loci)) return;
         const atom = SE.Loci.firstElement(loci);
         const sel = selectionFromLoci(atom);
         const label = sel ? sel.label : null;
@@ -2011,6 +2146,7 @@
           window.molapp.measurePending = [];
           addMeasurement(window.molapp.measureKind, picks);
         }
+        postMeasurePending();
       }
 
       async function addMeasurement(kind, picks) {
@@ -2018,19 +2154,30 @@
           const m = window.molapp.viewer.plugin.managers.structure.measurement;
           const l = picks.map(function (p) { return p.loci; });
           if (kind === 'angle') {
-            await m.addAngle(l[0], l[1], l[2]);
+            await m.addAngle(l[0], l[1], l[2], MEASUREMENT_OPTIONS.angle);
           } else if (kind === 'dihedral') {
-            await m.addDihedral(l[0], l[1], l[2], l[3]);
+            await m.addDihedral(l[0], l[1], l[2], l[3], MEASUREMENT_OPTIONS.dihedral);
           } else {
-            await m.addDistance(l[0], l[1]);
+            await m.addDistance(l[0], l[1], MEASUREMENT_OPTIONS.distance);
           }
           postMeasurement(picks.map(function (p) { return p.label || '?'; }).join(' — '));
         } catch (error) {
           const message = error && error.message ? error.message : String(error);
           postCommandResult({ id: 'measure', command: 'measureDistance', success: false, error: message });
         } finally {
-          // The drawn measurement identifies the atoms from here on; drop the pick marks.
-          clearMeasurePending();
+          // Drop the marks of the atoms THIS measurement consumed — the drawn measurement
+          // identifies them from here on. Deliberately not clearMeasurePending(): addMeasurement is
+          // not awaited, so an atom picked while addDistance was still running is already sitting in
+          // measurePending, and a blanket clear would swallow it (and its mark) with nothing to show
+          // the user why their pick did not count.
+          const plugin = window.molapp.viewer ? window.molapp.viewer.plugin : null;
+          const interactivity = plugin ? plugin.managers.interactivity : null;
+          if (interactivity) {
+            picks.forEach(function (p) { interactivity.lociSelects.deselect({ loci: p.loci }, true); });
+            const pending = window.molapp.measurePending;
+            // The newest pick owns the highlight; only take it back if nothing is pending.
+            if (!pending || !pending.length) interactivity.lociHighlights.clearHighlights();
+          }
         }
       }
 

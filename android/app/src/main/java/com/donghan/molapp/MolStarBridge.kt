@@ -260,6 +260,10 @@ class MolStarBridge {
                 return
             }
         }
+        // An event this shell does not handle (the shared viewer serves three shells, and the
+        // Flutter one reads events Compose has no UI for) is not a command result — ignore it
+        // rather than mis-parsing it as one and reporting a bogus failure.
+        if (body.has("event")) return
         // Otherwise it is a command result: { id, command, success, error, label }.
         receiveResult(body)
     }

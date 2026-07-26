@@ -1,0 +1,47 @@
+name: molapp
+description: "MolApp — Mol*-powered molecule viewer for iOS, Android, macOS, Windows and Linux."
+publish_to: 'none'
+
+# Keep in step with the native apps this replaces: iOS MARKETING_VERSION 1.0.3 / build 9,
+# Android versionName 1.0.4 / versionCode 3. The Flutter build starts a fresh line at 1.0.4.
+version: 1.1.0+10
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # The Mol* viewport. This is the one plugin that covers all five targets:
+  # Android/iOS (WebKit+Chromium), macOS (WKWebView), Windows (WebView2), Linux (WPE WebKit).
+  flutter_inappwebview: ^6.2.0-beta.3
+
+  # File open (structure + .molapp state) and desktop save dialogs.
+  file_selector: ^1.0.3
+  # Mobile has no save dialog; exports go out through the system share sheet instead.
+  share_plus: ^12.0.0
+  path_provider: ^2.1.5
+
+  # Export encoders. The viewport hands us a PNG data URL; these re-encode it.
+  image: ^4.5.4
+  pdf: ^3.11.3
+  printing: ^5.14.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  # Synced from ../MolApp/Resources by `dart run tool/sync_web_assets.dart`, the same
+  # single-source-of-truth rule the Android app's copyWebAssets task follows. Gitignored.
+  assets:
+    - assets/web/
+    - assets/web/molstar/
