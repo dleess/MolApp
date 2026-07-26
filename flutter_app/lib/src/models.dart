@@ -1,72 +1,58 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+
+/// Enum names are the wire format: they are what viewer.html reads, so renaming a value renames
+/// the protocol. The `models_test` name assertions are what holds that contract in place.
 
 /// Scene-wide representation offered by Display ▸ Representation. A strict subset of
 /// [ObjectRepresentation]: the whole-scene menu only ever offered these three.
 enum MoleculeRepresentation {
-  ribbon('ribbon', 'Ribbon', Icons.gesture),
-  surface('surface', 'Surface', Icons.blur_on),
-  stick('stick', 'Stick', Icons.remove);
+  ribbon('Ribbon', Icons.gesture),
+  surface('Surface', Icons.blur_on),
+  stick('Stick', Icons.remove);
 
-  const MoleculeRepresentation(this.raw, this.title, this.icon);
+  const MoleculeRepresentation(this.title, this.icon);
 
-  final String raw;
   final String title;
   final IconData icon;
 
-  static MoleculeRepresentation? fromRaw(String raw) {
-    for (final value in values) {
-      if (value.raw == raw) return value;
-    }
-    return null;
-  }
+  static MoleculeRepresentation? fromRaw(String raw) => values.asNameMap()[raw];
 }
 
 /// Structural features Display ▸ Visibility can show or hide across the whole scene.
 enum MoleculeVisibilityFeature {
-  protein('protein', 'Protein', Icons.polymer),
-  water('water', 'Water', Icons.water_drop_outlined),
-  ligand('ligand', 'Ligand', Icons.hexagon_outlined);
+  protein('Protein', Icons.polymer),
+  water('Water', Icons.water_drop_outlined),
+  ligand('Ligand', Icons.hexagon_outlined);
 
-  const MoleculeVisibilityFeature(this.raw, this.title, this.icon);
+  const MoleculeVisibilityFeature(this.title, this.icon);
 
-  final String raw;
   final String title;
   final IconData icon;
 
-  static MoleculeVisibilityFeature? fromRaw(String raw) {
-    for (final value in values) {
-      if (value.raw == raw) return value;
-    }
-    return null;
-  }
+  static MoleculeVisibilityFeature? fromRaw(String raw) => values.asNameMap()[raw];
 }
 
 /// Per-object representation shown as the Rib/Sur/Stk/B+S/Sph buttons in the Objects panel.
 enum ObjectRepresentation {
-  ribbon('ribbon', 'Ribbon', 'Rib'),
-  surface('surface', 'Surface', 'Sur'),
-  stick('stick', 'Stick', 'Stk'),
-  ballAndStick('ballAndStick', 'Ball+Stick', 'B+S'),
-  sphere('sphere', 'Sphere', 'Sph');
+  ribbon('Ribbon', 'Rib'),
+  surface('Surface', 'Sur'),
+  stick('Stick', 'Stk'),
+  ballAndStick('Ball+Stick', 'B+S'),
+  sphere('Sphere', 'Sph');
 
-  const ObjectRepresentation(this.raw, this.title, this.shortTitle);
+  const ObjectRepresentation(this.title, this.shortTitle);
 
-  final String raw;
   final String title;
   final String shortTitle;
 
-  static ObjectRepresentation? fromRaw(String raw) {
-    for (final value in values) {
-      if (value.raw == raw) return value;
-    }
-    return null;
-  }
+  static ObjectRepresentation? fromRaw(String raw) => values.asNameMap()[raw];
 
   /// Case-insensitive lookup for the `repr <name> <object>` command, which lowercases its keywords.
   static ObjectRepresentation? fromRawIgnoringCase(String raw) {
     final needle = raw.toLowerCase();
     for (final value in values) {
-      if (value.raw.toLowerCase() == needle) return value;
+      if (value.name.toLowerCase() == needle) return value;
     }
     return null;
   }
@@ -167,21 +153,12 @@ class SelectionAST {
       other is SelectionAST &&
       other.kind == kind &&
       other.value == value &&
-      _listEquals(other.left, left) &&
-      _listEquals(other.right, right) &&
-      _listEquals(other.operand, operand);
+      listEquals(other.left, left) &&
+      listEquals(other.right, right) &&
+      listEquals(other.operand, operand);
 
   @override
   int get hashCode => Object.hash(kind, value, left?.length, right?.length, operand?.length);
-
-  static bool _listEquals(List<SelectionAST>? a, List<SelectionAST>? b) {
-    if (a == null || b == null) return a == b;
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
 }
 
 /// A selection, either picked in the viewport (atom/residue fields) or parsed from an expression
@@ -234,30 +211,29 @@ class MoleculeSelection {
 
 /// Measurement modes. The atom count is how many picks close one measurement.
 enum MeasureKind {
-  distance('distance', 'Distance', 2),
-  angle('angle', 'Angle', 3),
-  dihedral('dihedral', 'Dihedral', 4);
+  distance('Distance', 2),
+  angle('Angle', 3),
+  dihedral('Dihedral', 4);
 
-  const MeasureKind(this.raw, this.title, this.atomCount);
+  const MeasureKind(this.title, this.atomCount);
 
-  final String raw;
   final String title;
   final int atomCount;
 }
 
 /// Containers File ▸ Export Display can write the current viewport to.
 enum ExportFormat {
-  png('png', 'PNG', 'png'),
-  jpeg('jpeg', 'JPEG', 'jpg'),
-  gif('gif', 'GIF', 'gif'),
-  svg('svg', 'SVG', 'svg'),
-  pdf('pdf', 'PDF', 'pdf');
+  png('PNG', 'png', 'image/png'),
+  jpeg('JPEG', 'jpg', 'image/jpeg'),
+  gif('GIF', 'gif', 'image/gif'),
+  svg('SVG', 'svg', 'image/svg+xml'),
+  pdf('PDF', 'pdf', 'application/pdf');
 
-  const ExportFormat(this.raw, this.title, this.fileExtension);
+  const ExportFormat(this.title, this.fileExtension, this.mimeType);
 
-  final String raw;
   final String title;
   final String fileExtension;
+  final String mimeType;
 }
 
 class PdbIdentifierException implements Exception {

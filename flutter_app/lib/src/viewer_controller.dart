@@ -56,9 +56,21 @@ class ViewerController extends ChangeNotifier {
   }
 
   void clearError() {
+    _beginAction();
+    notifyListeners();
+  }
+
+  /// Every action starts from a clean error state on both sides; callers notify once they have
+  /// finished mutating their own fields.
+  void _beginAction() {
     localErrorMessage = null;
     bridge.clearError();
-    notifyListeners();
+  }
+
+  /// An action that could not start or finish: drop the optimistic status and report why.
+  void _failAction(String message) {
+    statusMessage = kIdleStatus;
+    updateError(message);
   }
 
   void setPdbText(String value) {
@@ -175,8 +187,7 @@ class ViewerController extends ChangeNotifier {
       final pdbId = PdbIdentifier.normalized(pdbText);
       pdbText = pdbId;
       statusMessage = 'Loading $pdbId';
-      localErrorMessage = null;
-      bridge.clearError();
+      _beginAction();
       bridge.loadPdbId(pdbId);
       notifyListeners();
     } on PdbIdentifierException catch (error) {
@@ -186,63 +197,56 @@ class ViewerController extends ChangeNotifier {
 
   void setRepresentation(MoleculeRepresentation representation) {
     selectedRepresentation = representation;
-    localErrorMessage = null;
-    bridge.clearError();
-    bridge.setRepresentation(representation.raw, targets: visibleStructureNames);
+    _beginAction();
+    bridge.setRepresentation(representation.name, targets: visibleStructureNames);
     notifyListeners();
   }
 
   void toggleVisibility(MoleculeVisibilityFeature feature) {
     final isVisible = !(visibilityStates[feature] ?? true);
     visibilityStates = <MoleculeVisibilityFeature, bool>{...visibilityStates, feature: isVisible};
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     statusMessage = '${feature.title} ${isVisible ? 'shown' : 'hidden'}';
-    bridge.toggleVisibility(feature: feature.raw, isVisible: isVisible);
+    bridge.toggleVisibility(feature: feature.name, isVisible: isVisible);
     notifyListeners();
   }
 
   void toggleMeasure(MeasureKind kind) {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     if (measureKind == kind) {
       measureKind = null;
       bridge.setMeasureMode(false);
       statusMessage = 'Measure mode off';
     } else {
       measureKind = kind;
-      bridge.setMeasureMode(true, kind: kind.raw);
+      bridge.setMeasureMode(true, kind: kind.name);
       statusMessage = '${kind.title}: tap ${kind.atomCount} atoms';
     }
     notifyListeners();
   }
 
   void clearMeasurements() {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     bridge.clearMeasurements();
     updateStatus('Measurements cleared');
   }
 
   void surfacePotential() {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     statusMessage = 'Computing surface potential…';
     bridge.drawSurfacePotential(targets: visibleStructureNames);
     notifyListeners();
   }
 
   void secondaryStructure() {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     statusMessage = 'Assigning secondary structure…';
     bridge.computeSecondaryStructure(targets: visibleStructureNames);
     notifyListeners();
   }
 
   void superpose() {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     if (visibleStructureNames.length < 2) {
       updateError('Show at least two structures to superpose.');
       return;
@@ -253,8 +257,7 @@ class ViewerController extends ChangeNotifier {
   }
 
   void morphToggle() {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     if (isMorphing) {
       bridge.stopMorph();
     } else {
@@ -265,15 +268,13 @@ class ViewerController extends ChangeNotifier {
   }
 
   void setBackground(BackgroundPreset preset) {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     bridge.setBackgroundColor(preset.hex);
     updateStatus('Background: ${preset.title}');
   }
 
   void resetAll() {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     bridge.resetAll();
     updateStatus('Resetting…');
   }
@@ -284,9 +285,8 @@ class ViewerController extends ChangeNotifier {
     try {
       final structure = await LocalStructureFileLoader.open();
       if (structure == null) return;
-      localErrorMessage = null;
       statusMessage = 'Loading ${structure.label}';
-      bridge.clearError();
+      _beginAction();
       bridge.loadLocalStructure(
         data: structure.data,
         format: structure.format,
@@ -302,9 +302,8 @@ class ViewerController extends ChangeNotifier {
     try {
       final json = await LocalStructureFileLoader.openStateJson();
       if (json == null) return;
-      localErrorMessage = null;
       statusMessage = 'Loading state…';
-      bridge.clearError();
+      _beginAction();
       bridge.loadState(json);
       notifyListeners();
     } catch (error) {
@@ -313,8 +312,7 @@ class ViewerController extends ChangeNotifier {
   }
 
   Future<void> saveState() async {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     if (bridge.objects.isEmpty) {
       updateError('Nothing to save yet.');
       return;
@@ -322,27 +320,24 @@ class ViewerController extends ChangeNotifier {
     updateStatus('Capturing state…');
     final json = await bridge.serializeState();
     if (json == null || json.isEmpty) {
-      statusMessage = kIdleStatus;
-      updateError('Could not capture current state.');
+      _failAction('Could not capture current state.');
       return;
     }
     try {
       final status = await deliverFile(
-        bytes: Uint8List.fromList(utf8Bytes(json)),
+        bytes: utf8.encode(json),
         suggestedName: 'molecule.molapp',
         mimeType: 'application/json',
         shareTitle: 'MolApp state',
       );
       updateStatus(status ?? kIdleStatus);
     } catch (error) {
-      statusMessage = kIdleStatus;
-      updateError(error.toString());
+      _failAction(error.toString());
     }
   }
 
   Future<void> exportImage(ExportFormat format) async {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     if (bridge.objects.isEmpty) {
       updateError('Nothing to export yet.');
       return;
@@ -352,21 +347,19 @@ class ViewerController extends ChangeNotifier {
     if (png == null) return;
     try {
       final status = await deliverFile(
-        bytes: encodeExport(png, format),
+        bytes: await encodeExport(png, format),
         suggestedName: 'molecule.${format.fileExtension}',
-        mimeType: mimeTypeFor(format),
+        mimeType: format.mimeType,
         shareTitle: 'MolApp ${format.title}',
       );
       updateStatus(status ?? 'Exported ${format.title}');
     } catch (error) {
-      statusMessage = kIdleStatus;
-      updateError(error.toString());
+      _failAction(error.toString());
     }
   }
 
   Future<void> printDisplay() async {
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
     if (bridge.objects.isEmpty) {
       updateError('Nothing to print yet.');
       return;
@@ -378,8 +371,7 @@ class ViewerController extends ChangeNotifier {
       await printImage(png);
       updateStatus(kIdleStatus);
     } catch (error) {
-      statusMessage = kIdleStatus;
-      updateError(error.toString());
+      _failAction(error.toString());
     }
   }
 
@@ -387,8 +379,7 @@ class ViewerController extends ChangeNotifier {
     final dataUrl = await bridge.captureImageDataURL();
     final png = dataUrl == null ? null : bytesFromDataUrl(dataUrl);
     if (png == null) {
-      statusMessage = kIdleStatus;
-      updateError('Could not capture the display.');
+      _failAction('Could not capture the display.');
       return null;
     }
     return png;
@@ -402,8 +393,7 @@ class ViewerController extends ChangeNotifier {
     if (input.isEmpty) return;
 
     commandText = '';
-    localErrorMessage = null;
-    bridge.clearError();
+    _beginAction();
 
     final components =
         input.toLowerCase().split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
@@ -431,7 +421,7 @@ class ViewerController extends ChangeNotifier {
             notifyListeners();
           } else {
             updateError('Invalid representation. Use: '
-                '${ObjectRepresentation.values.map((e) => e.raw).join(', ')}');
+                '${ObjectRepresentation.values.map((e) => e.name).join(', ')}');
           }
         } else if (components.length >= 2) {
           final repr = MoleculeRepresentation.fromRaw(components[1]);
@@ -439,7 +429,7 @@ class ViewerController extends ChangeNotifier {
             setRepresentation(repr);
           } else {
             updateError('Invalid representation. Use: '
-                '${MoleculeRepresentation.values.map((e) => e.raw).join(', ')}');
+                '${MoleculeRepresentation.values.map((e) => e.name).join(', ')}');
           }
         } else {
           updateError('Usage: repr [ribbon|surface|stick|ballAndStick|sphere] [name?]');
@@ -490,10 +480,12 @@ class ViewerController extends ChangeNotifier {
           final objName = rawComponents.skip(2).join(' ');
           // Reject an unknown color name instead of silently painting it white: a typo like "gren"
           // must report the usage, not recolor the object indistinguishably from "white".
+          // A raw hex is validated for the same reason: hexToMolStarColor in viewer.html is a bare
+          // parseInt, so "#12345" reaches Mol* as NaN and paints the object black with no error.
           final String? colorHex;
           if (colorArg == 'default') {
             colorHex = null;
-          } else if (colorArg.startsWith('#')) {
+          } else if (_hexPattern.hasMatch(colorArg)) {
             colorHex = colorArg;
           } else if (namedColors.containsKey(colorArg)) {
             colorHex = namedColors[colorArg];
@@ -521,7 +513,7 @@ class ViewerController extends ChangeNotifier {
             }
           }
         }
-        if (hex != null && RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(hex)) {
+        if (hex != null && _hexPattern.hasMatch(hex)) {
           bridge.setBackgroundColor(hex);
           updateStatus('Background set');
         } else {
@@ -582,10 +574,15 @@ class ViewerController extends ChangeNotifier {
       default:
         updateError('Unknown command: $command');
     }
+
+    // The command bar mirrors [commandText], which was cleared above — but several branches are
+    // no-ops (re-arming the mode already armed, hiding what is already hidden) and notify nothing,
+    // so without this the typed text stays on screen while the run button greys out.
+    notifyListeners();
   }
+
+  static final RegExp _hexPattern = RegExp(r'^#[0-9A-Fa-f]{6}$');
 
   static const String _colorUsage =
       'Usage: color [red|green|blue|yellow|white|cyan|magenta|orange|#RRGGBB|default] [name]';
 }
-
-List<int> utf8Bytes(String value) => const Utf8Encoder().convert(value);

@@ -34,13 +34,7 @@ enum MolStarCommand {
   /// it: a command can clear these and then fail, so success is not a reliable signal.
   transientModesStopped;
 
-  static MolStarCommand? fromRaw(String? raw) {
-    if (raw == null) return null;
-    for (final value in values) {
-      if (value.name == raw) return value;
-    }
-    return null;
-  }
+  static MolStarCommand? fromRaw(String? raw) => raw == null ? null : values.asNameMap()[raw];
 }
 
 @immutable
@@ -238,7 +232,7 @@ class MolStarBridge extends ChangeNotifier {
   void setObjectRepresentation({required String name, required ObjectRepresentation representation}) {
     _send(MolStarCommand.setObjectRepresentation, <String, dynamic>{
       'name': name,
-      'representation': representation.raw,
+      'representation': representation.name,
     });
   }
 
@@ -462,8 +456,7 @@ class MolStarBridge extends ChangeNotifier {
           addObject(MolAppObject(
             name: name,
             type: MolAppObjectType.selection,
-            representation: ObjectRepresentation.fromRaw(raw['representation'] as String? ?? '') ??
-                ObjectRepresentation.ballAndStick,
+            representation: _representationOf(raw) ?? ObjectRepresentation.ballAndStick,
           ));
         }
       }
@@ -524,11 +517,11 @@ class MolStarBridge extends ChangeNotifier {
             name: name,
             type: type,
             isVisible: raw['isVisible'] as bool? ?? true,
-            representation: ObjectRepresentation.fromRaw(raw['representation'] as String? ?? '') ??
+            representation: _representationOf(raw) ??
                 (type == MolAppObjectType.structure
                     ? ObjectRepresentation.ribbon
                     : ObjectRepresentation.ballAndStick),
-            colorHex: raw['colorHex'] as String?,
+            colorHex: raw['colorHex'] is String ? raw['colorHex'] as String : null,
           ));
         }
         _objects = rebuilt;
@@ -544,6 +537,14 @@ class MolStarBridge extends ChangeNotifier {
     }
 
     _receiveResult(MolStarCommandResult.fromJson(message));
+  }
+
+  /// `.molapp` state files are user-editable and viewer.html echoes their object metadata straight
+  /// back, so these fields are type-checked here the same way `name` and `type` already are —
+  /// a bare `as String?` on a hand-edited file throws inside the message handler.
+  static ObjectRepresentation? _representationOf(Map<dynamic, dynamic> raw) {
+    final value = raw['representation'];
+    return value is String ? ObjectRepresentation.fromRaw(value) : null;
   }
 
   void _receiveResult(MolStarCommandResult result) {

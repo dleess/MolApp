@@ -64,6 +64,24 @@ void main() {
     expect(tester.widget<TextField>(commandField).controller!.text, isEmpty);
   });
 
+  testWidgets('the command bar clears even when the command changes nothing', (tester) async {
+    final bridge = await pumpViewer(tester);
+    bridge.receiveMessage(<String, dynamic>{'event': 'viewerReady'});
+
+    final commandField =
+        find.widgetWithText(TextField, 'Enter command (e.g. load 1crn, repr surface)...');
+    // Arming angle mode twice: the second run is a no-op inside the controller, and a no-op still
+    // has to leave the bar empty — otherwise the text sits there while the run button greys out.
+    for (var i = 0; i < 2; i++) {
+      await tester.enterText(commandField, 'measure angle');
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+    }
+
+    expect(tester.widget<TextField>(commandField).controller!.text, isEmpty);
+  });
+
   testWidgets('an invalid command surfaces its error in the info card', (tester) async {
     await pumpViewer(tester);
 
