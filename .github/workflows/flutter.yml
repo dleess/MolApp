@@ -65,6 +65,14 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    # flutter_inappwebview_windows 0.7.0-beta.3 includes <experimental/coroutine>, which MSVC 14.51
+    # (VS 18, what windows-latest ships) turns into a hard error C2338 / STL1011 rather than a
+    # warning — so this job had never once passed. The macro is the escape hatch STL1011 itself
+    # names, and cl.exe picks it up from the CL environment variable even when msbuild drives the
+    # build, which means the plugin's own sources stay untouched and nothing is pinned to an image
+    # that will age out. Drop this once the plugin moves to C++20 <coroutine>.
+    env:
+      CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
