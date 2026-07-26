@@ -6,6 +6,7 @@ import 'manual_page.dart';
 import 'models.dart';
 import 'molstar_bridge.dart';
 import 'molstar_web_view.dart';
+import 'tokens.dart';
 import 'viewer_controller.dart';
 
 class MoleculeViewerPage extends StatefulWidget {
@@ -64,7 +65,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0F14),
+      backgroundColor: ChromeTokens.viewport,
       body: AnimatedBuilder(
         animation: Listenable.merge(<Listenable>[_bridge, _controller]),
         child: widget.viewportBuilder?.call(_bridge) ?? MolStarWebView(bridge: _bridge),
@@ -118,12 +119,16 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.8),
+            color: ChromeTokens.scrim,
             borderRadius: BorderRadius.circular(999),
           ),
           child: Text(
             label,
-            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+            style: const TextStyle(
+              color: ChromeTokens.textPrimary,
+              fontSize: ChromeTokens.sizeBody,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       ),
@@ -153,19 +158,19 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.blue.withValues(alpha: 0.85),
+              color: ChromeTokens.banner,
               borderRadius: BorderRadius.circular(999),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                const Icon(Icons.straighten, size: 14, color: Colors.white),
+                const Icon(Icons.straighten, size: 14, color: ChromeTokens.textPrimary),
                 const SizedBox(width: 6),
                 Text(
                   text,
                   style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
+                    color: ChromeTokens.textPrimary,
+                    fontSize: ChromeTokens.sizeBody,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -196,7 +201,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
       left: 0,
       right: 0,
       child: Container(
-        color: Colors.black.withValues(alpha: 0.68),
+        color: ChromeTokens.scrim,
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: isCompact
             ? SingleChildScrollView(
@@ -235,8 +240,8 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
       builder: (context, controller, child) => TextButton(
         onPressed: () => controller.isOpen ? controller.close() : controller.open(),
         style: TextButton.styleFrom(
-          foregroundColor: Colors.white,
-          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          foregroundColor: ChromeTokens.textPrimary,
+          textStyle: const TextStyle(fontSize: ChromeTokens.sizeMenu, fontWeight: FontWeight.w600),
         ),
         child: Text(title),
       ),
@@ -251,8 +256,8 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
   }) {
     return MenuItemButton(
       onPressed: onPressed,
-      leadingIcon: Icon(icon, size: 18, color: destructive ? Colors.red : null),
-      style: destructive ? MenuItemButton.styleFrom(foregroundColor: Colors.red) : null,
+      leadingIcon: Icon(icon, size: 18, color: destructive ? ChromeTokens.destructive : null),
+      style: destructive ? MenuItemButton.styleFrom(foregroundColor: ChromeTokens.destructive) : null,
       child: Text(label),
     );
   }
@@ -263,7 +268,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
       child: Text(
         text.toUpperCase(),
         style: TextStyle(
-          fontSize: 11,
+          fontSize: ChromeTokens.sizeSmall,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.6,
           color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
@@ -346,7 +351,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
             height: 16,
             decoration: BoxDecoration(
               color: colorFromHex(preset.hex),
-              border: Border.all(color: Colors.grey.withValues(alpha: 0.6)),
+              border: Border.all(color: ChromeTokens.presetSwatchBorder),
               borderRadius: BorderRadius.circular(3),
             ),
           ),
@@ -420,7 +425,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
         constraints: const BoxConstraints(maxWidth: 340),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.55),
+          color: ChromeTokens.scrim,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
@@ -429,12 +434,16 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
           children: <Widget>[
             const Text(
               'Molecule Viewer',
-              style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: ChromeTokens.textPrimary,
+                fontSize: ChromeTokens.sizeTitle,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               _controller.statusMessage,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 13),
+              style: TextStyle(color: ChromeTokens.textSecondary, fontSize: ChromeTokens.sizeStatus),
             ),
             const SizedBox(height: 8),
             FilledButton.icon(
@@ -459,7 +468,10 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                       LengthLimitingTextInputFormatter(4),
                       FilteringTextInputFormatter.allow(RegExp('[A-Za-z0-9]')),
                     ],
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    style: const TextStyle(
+                      color: ChromeTokens.textPrimary,
+                      fontSize: ChromeTokens.sizeField,
+                    ),
                     decoration: const InputDecoration(
                       hintText: 'PDB ID',
                       isDense: true,
@@ -473,7 +485,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                   onPressed: _controller.pdbText.trim().isEmpty ? null : _controller.loadPdb,
                   icon: const Icon(Icons.download_outlined, size: 18),
                   label: const Text('Load PDB'),
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                  style: OutlinedButton.styleFrom(foregroundColor: ChromeTokens.textPrimary),
                 ),
               ],
             ),
@@ -481,7 +493,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
               const SizedBox(height: 8),
               Text(
                 error,
-                style: TextStyle(color: Colors.red.withValues(alpha: 0.9), fontSize: 12),
+                style: TextStyle(color: ChromeTokens.error, fontSize: ChromeTokens.sizeBody),
               ),
             ],
           ],
@@ -501,7 +513,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
         width: 220,
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.65),
+          color: ChromeTokens.scrim,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
@@ -512,14 +524,14 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
               onTap: () => setState(() => _isObjectsPanelExpanded = !_isObjectsPanelExpanded),
               child: Row(
                 children: <Widget>[
-                  const Icon(Icons.layers_outlined, size: 16, color: Colors.white),
+                  const Icon(Icons.layers_outlined, size: 16, color: ChromeTokens.textPrimary),
                   const SizedBox(width: 6),
                   const Expanded(
                     child: Text(
                       'Objects',
                       style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
+                        color: ChromeTokens.textPrimary,
+                        fontSize: ChromeTokens.sizeBody,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -527,7 +539,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                   Icon(
                     _isObjectsPanelExpanded ? Icons.expand_less : Icons.expand_more,
                     size: 16,
-                    color: Colors.white,
+                    color: ChromeTokens.textPrimary,
                   ),
                 ],
               ),
@@ -538,7 +550,10 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
                     'No objects',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+                    style: TextStyle(
+                      color: ChromeTokens.textSecondary,
+                      fontSize: ChromeTokens.sizeSmall,
+                    ),
                   ),
                 )
               else
@@ -553,7 +568,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                         for (final object in objects) ...<Widget>[
                           _objectRow(object),
                           if (object != objects.last)
-                            Divider(height: 10, color: Colors.white.withValues(alpha: 0.15)),
+                            Divider(height: 10, color: ChromeTokens.hairline),
                         ],
                       ],
                     ),
@@ -581,7 +596,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                 child: Icon(
                   object.isVisible ? Icons.visibility : Icons.visibility_off,
                   size: 15,
-                  color: object.isVisible ? Colors.white : Colors.white.withValues(alpha: 0.35),
+                  color: object.isVisible ? ChromeTokens.textPrimary : ChromeTokens.textDisabled,
                 ),
               ),
               const SizedBox(width: 6),
@@ -594,16 +609,16 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
+                        color: ChromeTokens.textPrimary,
+                        fontSize: ChromeTokens.sizeBody,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
                     Text(
                       object.type.name,
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.45),
-                        fontSize: 10,
+                        color: ChromeTokens.textSecondary,
+                        fontSize: ChromeTokens.sizeMicro,
                       ),
                     ),
                   ],
@@ -629,18 +644,18 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
                     decoration: BoxDecoration(
                       color: object.representation == repr
-                          ? Colors.white.withValues(alpha: 0.25)
+                          ? ChromeTokens.chipSelectedFill
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(3),
                     ),
                     child: Text(
                       repr.shortTitle,
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: ChromeTokens.sizeMicro,
                         fontWeight: FontWeight.w500,
                         color: object.representation == repr
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.6),
+                            ? ChromeTokens.textPrimary
+                            : ChromeTokens.textSecondary,
                       ),
                     ),
                   ),
@@ -662,7 +677,10 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const Text('Color', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                const Text(
+                  'Color',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: ChromeTokens.sizeBody),
+                ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
@@ -689,7 +707,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
           decoration: BoxDecoration(
             color: object.swatchColor,
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 0.5),
+            border: Border.all(color: ChromeTokens.dotBorder, width: 0.5),
           ),
         ),
       ),
@@ -708,9 +726,9 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
           width: 26,
           height: 26,
           decoration: BoxDecoration(
-            color: colorFromHex(hex) ?? Colors.grey.withValues(alpha: 0.4),
+            color: colorFromHex(hex) ?? ChromeTokens.dotFallback,
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 0.5),
+            border: Border.all(color: ChromeTokens.dotBorder, width: 0.5),
           ),
         ),
       ),
@@ -731,13 +749,13 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
           margin: const EdgeInsets.symmetric(horizontal: 16),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.75),
+            color: ChromeTokens.scrim,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+            border: Border.all(color: ChromeTokens.hairline),
           ),
           child: Row(
             children: <Widget>[
-              Icon(Icons.terminal, size: 18, color: Colors.white.withValues(alpha: 0.6)),
+              Icon(Icons.terminal, size: 18, color: ChromeTokens.textSecondary),
               const SizedBox(width: 8),
               Expanded(
                 child: TextField(
@@ -746,10 +764,16 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                   onSubmitted: (_) => _controller.executeCommand(),
                   autocorrect: false,
                   enableSuggestions: false,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  style: const TextStyle(
+                    color: ChromeTokens.textPrimary,
+                    fontSize: ChromeTokens.sizeField,
+                  ),
                   decoration: InputDecoration(
                     hintText: 'Enter command (e.g. load 1crn, repr surface)...',
-                    hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 14),
+                    hintStyle: TextStyle(
+                      color: ChromeTokens.textSecondary,
+                      fontSize: ChromeTokens.sizeField,
+                    ),
                     border: InputBorder.none,
                     isDense: true,
                   ),
@@ -758,7 +782,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
               if (hasText)
                 IconButton(
                   onPressed: () => _controller.setCommandText(''),
-                  icon: Icon(Icons.cancel, size: 18, color: Colors.white.withValues(alpha: 0.6)),
+                  icon: Icon(Icons.cancel, size: 18, color: ChromeTokens.textSecondary),
                   tooltip: 'Clear',
                 ),
               IconButton(
@@ -766,7 +790,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                 icon: Icon(
                   Icons.arrow_circle_up,
                   size: 22,
-                  color: hasText ? Colors.blue : Colors.white.withValues(alpha: 0.3),
+                  color: hasText ? ChromeTokens.accent : ChromeTokens.textDisabled,
                 ),
                 tooltip: 'Run command',
               ),
