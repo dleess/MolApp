@@ -38,22 +38,34 @@ jobs:
       - run: flutter test
 
   linux:
-    runs-on: ubuntu-latest
+    # Pinned to 22.04, not ubuntu-latest, and that is forced rather than chosen: flutter_inappwebview_linux
+    # renders through WPE WebKit and its CMakeLists FATAL_ERRORs without it, but Ubuntu dropped every
+    # WPE package after jammy. 24.04 has no libwpe-1.0-dev, no libwpebackend-fdo-1.0-dev and no
+    # libwpewebkit-*-dev at all, which is why this job had never once passed — the names it asked for
+    # could not be renamed into existence. jammy is the newest release that still carries them.
+    #
+    # The plugin tries wpe-webkit-2.0, then 1.1, then 1.0; jammy's libwpewebkit-1.0-dev (WPE WebKit
+    # 2.36) satisfies the last of those, and libwpebackend-fdo-1.0-dev satisfies the legacy backend
+    # path. Revisit when Ubuntu ships WPE again or the plugin grows a non-WPE Linux backend — this
+    # image will age out first.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-      # flutter_inappwebview_linux renders through WPE WebKit offscreen. It prefers the modern
-      # wpe-platform-2.0 API and falls back to wpe-webkit-1.1 + wpebackend-fdo-1.0, which is what
-      # Ubuntu actually ships.
       - name: Install Flutter Linux and WPE WebKit dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
-            libwpewebkit-1.1-dev libwpebackend-fdo-1.0-dev libwpe-1.0-dev libepoxy-dev
+            libwpewebkit-1.0-dev libwpebackend-fdo-1.0-dev libwpe-1.0-dev libepoxy-dev
+        working-directory: .
+      # Cheap, and makes any future failure self-diagnosing: if the plugin stops finding a backend,
+      # this says which modules the image actually had.
+      - name: Show the WPE pkg-config modules that are present
+        run: pkg-config --list-all | grep -iE 'wpe|epoxy' || echo 'no wpe/epoxy modules found'
         working-directory: .
       - run: flutter pub get
       - run: dart run tool/sync_web_assets.dart
