@@ -265,4 +265,18 @@ void main() {
     );
     expect(print.onPressed, isNull, reason: 'nothing loaded yet, so there is nothing to print');
   });
+
+  testWidgets('the info card and the objects panel do not collide in landscape', (tester) async {
+    // 874x402 is an iPhone 17 Pro rotated. The two overlays are anchored independently — the card
+    // from the top, the panel from the bottom — so on a short viewport they used to overlap by
+    // 88pt, with the panel painting over Open Structure, the PDB field and Load PDB.
+    await pumpViewer(tester, size: const Size(874, 402));
+
+    final cardBottom = tester.getRect(find.text('Load PDB')).bottom;
+    final panelTop = tester.getRect(find.text('Objects')).top;
+
+    expect(panelTop, greaterThanOrEqualTo(cardBottom),
+        reason: 'objects panel starts $panelTop, info card still runs to $cardBottom');
+  });
+
 }
