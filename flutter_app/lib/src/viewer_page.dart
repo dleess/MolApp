@@ -91,8 +91,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
                   fit: StackFit.expand,
                   children: <Widget>[
                     _menuBar(isCompact: isCompact),
-                    _infoCard(),
-                    _objectsPanel(),
+                    _leftRail(),
                     _commandBar(),
                     ?banner,
                   ],
@@ -412,92 +411,119 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
     ]);
   }
 
+  /// The info card and the objects panel share one column so they cannot overlap.
+  ///
+  /// They used to be anchored independently — the card from the top, the panel from the bottom —
+  /// which reads fine on a tall phone and collides by 88pt on a rotated one, the panel painting
+  /// over Open Structure, the PDB field and Load PDB. minHeight makes the column fill the rail
+  /// whenever there is room, so spaceBetween reproduces the old positions exactly; when there is
+  /// not room the column takes its natural height and the rail scrolls instead of overlapping.
+  ///
+  /// `top` hangs off the menu bar rather than the screen so the iPad's extra offset carries
+  /// through instead of letting the bar clip the card's top corners.
+  Widget _leftRail() {
+    return Positioned(
+      left: 16,
+      top: _menuBarTop(context) + 92,
+      bottom: 120,
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: <Widget>[
+                _infoCard(),
+                _objectsPanel(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // MARK: - Info card
 
   Widget _infoCard() {
     final error = _controller.errorMessage;
-    return Positioned(
-      // Hangs off the menu bar rather than off the top, so the iPad's extra offset carries through
-      // instead of letting the bar clip the card's top corners.
-      top: _menuBarTop(context) + 92,
-      left: 16,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 340),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: ChromeTokens.scrim,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const Text(
-              'Molecule Viewer',
-              style: TextStyle(
-                color: ChromeTokens.textPrimary,
-                fontSize: ChromeTokens.sizeTitle,
-                fontWeight: FontWeight.w600,
-              ),
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 340),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: ChromeTokens.scrim,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'Molecule Viewer',
+            style: TextStyle(
+              color: ChromeTokens.textPrimary,
+              fontSize: ChromeTokens.sizeTitle,
+              fontWeight: FontWeight.w600,
             ),
-            const SizedBox(height: 8),
-            Text(
-              _controller.statusMessage,
-              style: TextStyle(color: ChromeTokens.textSecondary, fontSize: ChromeTokens.sizeStatus),
-            ),
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: _controller.openStructure,
-              icon: const Icon(Icons.folder_open, size: 18),
-              label: const Text('Open Structure'),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                SizedBox(
-                  width: 108,
-                  height: 38,
-                  child: TextField(
-                    controller: _pdbField,
-                    onChanged: _controller.setPdbText,
-                    onSubmitted: (_) => _controller.loadPdb(),
-                    textCapitalization: TextCapitalization.characters,
-                    autocorrect: false,
-                    inputFormatters: <TextInputFormatter>[
-                      LengthLimitingTextInputFormatter(4),
-                      FilteringTextInputFormatter.allow(RegExp('[A-Za-z0-9]')),
-                    ],
-                    style: const TextStyle(
-                      color: ChromeTokens.textPrimary,
-                      fontSize: ChromeTokens.sizeField,
-                    ),
-                    decoration: const InputDecoration(
-                      hintText: 'PDB ID',
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                      border: OutlineInputBorder(),
-                    ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _controller.statusMessage,
+            style: TextStyle(color: ChromeTokens.textSecondary, fontSize: ChromeTokens.sizeStatus),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: _controller.openStructure,
+            icon: const Icon(Icons.folder_open, size: 18),
+            label: const Text('Open Structure'),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              SizedBox(
+                width: 108,
+                height: 38,
+                child: TextField(
+                  controller: _pdbField,
+                  onChanged: _controller.setPdbText,
+                  onSubmitted: (_) => _controller.loadPdb(),
+                  textCapitalization: TextCapitalization.characters,
+                  autocorrect: false,
+                  inputFormatters: <TextInputFormatter>[
+                    LengthLimitingTextInputFormatter(4),
+                    FilteringTextInputFormatter.allow(RegExp('[A-Za-z0-9]')),
+                  ],
+                  style: const TextStyle(
+                    color: ChromeTokens.textPrimary,
+                    fontSize: ChromeTokens.sizeField,
+                  ),
+                  decoration: const InputDecoration(
+                    hintText: 'PDB ID',
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                    border: OutlineInputBorder(),
                   ),
                 ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: _controller.pdbText.trim().isEmpty ? null : _controller.loadPdb,
-                  icon: const Icon(Icons.download_outlined, size: 18),
-                  label: const Text('Load PDB'),
-                  style: OutlinedButton.styleFrom(foregroundColor: ChromeTokens.textPrimary),
-                ),
-              ],
-            ),
-            if (error != null) ...<Widget>[
-              const SizedBox(height: 8),
-              Text(
-                error,
-                style: TextStyle(color: ChromeTokens.error, fontSize: ChromeTokens.sizeBody),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _controller.pdbText.trim().isEmpty ? null : _controller.loadPdb,
+                icon: const Icon(Icons.download_outlined, size: 18),
+                label: const Text('Load PDB'),
+                style: OutlinedButton.styleFrom(foregroundColor: ChromeTokens.textPrimary),
               ),
             ],
+          ),
+          if (error != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              error,
+              style: TextStyle(color: ChromeTokens.error, fontSize: ChromeTokens.sizeBody),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -506,76 +532,72 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
 
   Widget _objectsPanel() {
     final objects = _bridge.objects;
-    return Positioned(
-      left: 16,
-      bottom: 120,
-      child: Container(
-        width: 220,
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: ChromeTokens.scrim,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            InkWell(
-              onTap: () => setState(() => _isObjectsPanelExpanded = !_isObjectsPanelExpanded),
-              child: Row(
-                children: <Widget>[
-                  const Icon(Icons.layers_outlined, size: 16, color: ChromeTokens.textPrimary),
-                  const SizedBox(width: 6),
-                  const Expanded(
-                    child: Text(
-                      'Objects',
-                      style: TextStyle(
-                        color: ChromeTokens.textPrimary,
-                        fontSize: ChromeTokens.sizeBody,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  Icon(
-                    _isObjectsPanelExpanded ? Icons.expand_less : Icons.expand_more,
-                    size: 16,
-                    color: ChromeTokens.textPrimary,
-                  ),
-                ],
-              ),
-            ),
-            if (_isObjectsPanelExpanded)
-              if (objects.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
+    return Container(
+      width: 220,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: ChromeTokens.scrim,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          InkWell(
+            onTap: () => setState(() => _isObjectsPanelExpanded = !_isObjectsPanelExpanded),
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.layers_outlined, size: 16, color: ChromeTokens.textPrimary),
+                const SizedBox(width: 6),
+                const Expanded(
                   child: Text(
-                    'No objects',
+                    'Objects',
                     style: TextStyle(
-                      color: ChromeTokens.textSecondary,
-                      fontSize: ChromeTokens.sizeSmall,
-                    ),
-                  ),
-                )
-              else
-                ConstrainedBox(
-                  // The panel is an overlay on the viewport; a long ligand list must scroll inside
-                  // it rather than push the command bar off screen.
-                  constraints: const BoxConstraints(maxHeight: 260),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        for (final object in objects) ...<Widget>[
-                          _objectRow(object),
-                          if (object != objects.last)
-                            Divider(height: 10, color: ChromeTokens.hairline),
-                        ],
-                      ],
+                      color: ChromeTokens.textPrimary,
+                      fontSize: ChromeTokens.sizeBody,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-          ],
-        ),
+                Icon(
+                  _isObjectsPanelExpanded ? Icons.expand_less : Icons.expand_more,
+                  size: 16,
+                  color: ChromeTokens.textPrimary,
+                ),
+              ],
+            ),
+          ),
+          if (_isObjectsPanelExpanded)
+            if (objects.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'No objects',
+                  style: TextStyle(
+                    color: ChromeTokens.textSecondary,
+                    fontSize: ChromeTokens.sizeSmall,
+                  ),
+                ),
+              )
+            else
+              ConstrainedBox(
+                // The panel is an overlay on the viewport; a long ligand list must scroll inside
+                // it rather than push the command bar off screen.
+                constraints: const BoxConstraints(maxHeight: 260),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      for (final object in objects) ...<Widget>[
+                        _objectRow(object),
+                        if (object != objects.last)
+                          Divider(height: 10, color: ChromeTokens.hairline),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+        ],
       ),
     );
   }

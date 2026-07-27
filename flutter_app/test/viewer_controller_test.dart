@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:molapp/src/models.dart';
 import 'package:molapp/src/molstar_bridge.dart';
@@ -300,4 +301,43 @@ void main() {
       expect(() => jsonDecode(json), returnsNormally);
     });
   });
+
+  group('a dismissed save dialog', () {
+    const onePixelPng = 'data:image/png;base64,'
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+    setUp(() {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      FileSelectorPlatform.instance = _CancellingFileSelector();
+    });
+
+    test('leaves saveState at idle rather than claiming it wrote a file', () async {
+      final h = _Harness()..loadStructures(<String>['1CRN']);
+      h.runner.asyncResult = '{}';
+      await h.controller.saveState();
+      expect(h.controller.statusMessage, kIdleStatus);
+    });
+
+    test('leaves exportImage at idle rather than claiming it exported', () async {
+      // deliverFile returns null ONLY from its cancel branch, so `?? 'Exported PNG'` announced a
+      // file that was never written. saveState, three methods away, always got this right.
+      final h = _Harness()..loadStructures(<String>['1CRN']);
+      h.runner.asyncResult = onePixelPng;
+      await h.controller.exportImage(ExportFormat.png);
+      expect(h.controller.statusMessage, isNot(contains('Exported')));
+      expect(h.controller.statusMessage, kIdleStatus);
+    });
+  });
+
+}
+
+/// Stands in for the native Save-as dialog. `getSaveLocation` returning null is exactly what
+/// `file_selector` reports when the user dismisses it — the case the app used to misreport.
+class _CancellingFileSelector extends FileSelectorPlatform {
+  @override
+  Future<FileSaveLocation?> getSaveLocation({
+    SaveDialogOptions? options,
+    List<XTypeGroup>? acceptedTypeGroups,
+  }) async =>
+      null;
 }

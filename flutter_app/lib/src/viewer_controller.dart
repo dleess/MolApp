@@ -352,7 +352,9 @@ class ViewerController extends ChangeNotifier {
         mimeType: format.mimeType,
         shareTitle: 'MolApp ${format.title}',
       );
-      updateStatus(status ?? 'Exported ${format.title}');
+      // A null status means the user dismissed the save dialog, so there is nothing to announce.
+      // Claiming "Exported PNG" for a file that was never written is worse than saying nothing.
+      updateStatus(status ?? kIdleStatus);
     } catch (error) {
       _failAction(error.toString());
     }
