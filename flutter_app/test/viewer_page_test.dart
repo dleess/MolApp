@@ -50,6 +50,62 @@ void main() {
     expect(find.text('Enter command (e.g. load 1crn, repr surface)...'), findsOneWidget);
   });
 
+  testWidgets('the structure loading card starts open and can be closed', (tester) async {
+    await pumpViewer(tester);
+
+    expect(find.text('Molecule Viewer'), findsOneWidget);
+    expect(find.byTooltip('Close structure loading'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Close structure loading'));
+    await tester.pump();
+
+    expect(find.text('Molecule Viewer'), findsNothing);
+    expect(find.byType(TextField), findsOneWidget);
+
+    await tester.tap(find.text('File'));
+    await tester.pumpAndSettle();
+    expect(find.text('Open Structure'), findsOneWidget);
+  });
+
+  testWidgets('File menu reopens the closed structure loading card', (tester) async {
+    await pumpViewer(tester);
+
+    await tester.tap(find.byTooltip('Close structure loading'));
+    await tester.pump();
+    expect(find.text('Molecule Viewer'), findsNothing);
+
+    await tester.tap(find.text('File'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open Structure'));
+    await tester.pumpAndSettle();
+    expect(find.text('Molecule Viewer'), findsOneWidget);
+
+    await tester.tap(find.text('File'));
+    await tester.pumpAndSettle();
+    expect(find.text('Load PDB ID'), findsNothing);
+  });
+
+  testWidgets('Display menu groups background presets in a submenu', (tester) async {
+    await pumpViewer(tester);
+
+    await tester.tap(find.text('Display'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.ancestor(of: find.text('Background'), matching: find.byType(SubmenuButton)),
+      findsOneWidget,
+    );
+    expect(find.text('White'), findsNothing);
+
+    await tester.tap(find.text('Background'));
+    await tester.pumpAndSettle();
+    expect(find.text('White'), findsOneWidget);
+
+    await tester.tap(find.text('White'));
+    await tester.pumpAndSettle();
+    expect(find.text('Background: White'), findsOneWidget);
+  });
+
   testWidgets('the command bar runs what was typed', (tester) async {
     final bridge = await pumpViewer(tester);
     bridge.receiveMessage(<String, dynamic>{'event': 'viewerReady'});

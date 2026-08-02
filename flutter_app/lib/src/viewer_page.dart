@@ -25,6 +25,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
   late final ViewerController _controller;
   final TextEditingController _pdbField = TextEditingController();
   final TextEditingController _commandField = TextEditingController();
+  bool _isInfoCardVisible = true;
   bool _isObjectsPanelExpanded = true;
 
   @override
@@ -279,11 +280,10 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
   Widget _fileMenu() {
     final hasObjects = _bridge.objects.isNotEmpty;
     return _menuButton('File', <Widget>[
-      _item('Open Structure', Icons.folder_open, _controller.openStructure),
       _item(
-        'Load PDB ID',
-        Icons.download_outlined,
-        _controller.pdbText.trim().isEmpty ? null : _controller.loadPdb,
+        'Open Structure',
+        Icons.folder_open,
+        () => setState(() => _isInfoCardVisible = true),
       ),
       const Divider(height: 8),
       _item('Save State (.molapp)', Icons.save_outlined, hasObjects ? _controller.saveState : null),
@@ -341,21 +341,25 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
           feature.icon,
           () => _controller.toggleVisibility(feature),
         ),
-      _sectionLabel('Background'),
-      for (final preset in backgroundPresets)
-        MenuItemButton(
-          onPressed: () => _controller.setBackground(preset),
-          leadingIcon: Container(
-            width: 16,
-            height: 16,
-            decoration: BoxDecoration(
-              color: colorFromHex(preset.hex),
-              border: Border.all(color: ChromeTokens.presetSwatchBorder),
-              borderRadius: BorderRadius.circular(3),
+      SubmenuButton(
+        menuChildren: <Widget>[
+          for (final preset in backgroundPresets)
+            MenuItemButton(
+              onPressed: () => _controller.setBackground(preset),
+              leadingIcon: Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: colorFromHex(preset.hex),
+                  border: Border.all(color: ChromeTokens.presetSwatchBorder),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              child: Text(preset.title),
             ),
-          ),
-          child: Text(preset.title),
-        ),
+        ],
+        child: const Text('Background'),
+      ),
     ]);
   }
 
@@ -434,7 +438,7 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
-                _infoCard(),
+                if (_isInfoCardVisible) _infoCard() else const SizedBox(width: 340),
                 _objectsPanel(),
               ],
             ),
@@ -459,13 +463,28 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const Text(
-            'Molecule Viewer',
-            style: TextStyle(
-              color: ChromeTokens.textPrimary,
-              fontSize: ChromeTokens.sizeTitle,
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            children: <Widget>[
+              const Expanded(
+                child: Text(
+                  'Molecule Viewer',
+                  style: TextStyle(
+                    color: ChromeTokens.textPrimary,
+                    fontSize: ChromeTokens.sizeTitle,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: () => setState(() => _isInfoCardVisible = false),
+                tooltip: 'Close structure loading',
+                icon: const Icon(Icons.close, size: 18),
+                color: ChromeTokens.textSecondary,
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
