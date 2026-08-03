@@ -432,6 +432,11 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
       bottom: 120,
       child: LayoutBuilder(
         builder: (context, constraints) => SingleChildScrollView(
+          // Scrollables hit-test opaque by default, so this full-height strip swallowed viewport
+          // touches wherever the rail is transparent — worst after closing the info card, whose
+          // whole footprint went dead. deferToChild lets empty space fall through to the molecule;
+          // scrolling still works because it only matters when content overflows and fills the rail.
+          hitTestBehavior: HitTestBehavior.deferToChild,
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: constraints.maxHeight),
             child: Column(

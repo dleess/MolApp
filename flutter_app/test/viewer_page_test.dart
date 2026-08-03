@@ -322,6 +322,37 @@ void main() {
     expect(print.onPressed, isNull, reason: 'nothing loaded yet, so there is nothing to print');
   });
 
+  testWidgets('closing the info card frees its spot for viewport touches', (tester) async {
+    // The left rail's scrollable used to hit-test opaque over its whole strip, so after closing
+    // the structure-loading card the empty 340pt column still swallowed every touch meant for the
+    // molecule underneath.
+    var viewportTaps = 0;
+    tester.view
+      ..physicalSize = const Size(1200, 900) * tester.view.devicePixelRatio
+      ..devicePixelRatio = tester.view.devicePixelRatio;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
+        home: MoleculeViewerPage(
+          viewportBuilder: (bridge) => Listener(
+            onPointerDown: (_) => viewportTaps++,
+            child: const _ViewportStub(),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Close structure loading'));
+    await tester.pump();
+    expect(find.text('Molecule Viewer'), findsNothing);
+
+    // Middle of where the card used to sit: left rail starts at x16, card was 340 wide, top ~100.
+    await tester.tapAt(const Offset(180, 200));
+    expect(viewportTaps, 1, reason: 'the tap must fall through to the viewport');
+  });
+
   testWidgets('the info card and the objects panel do not collide in landscape', (tester) async {
     // 874x402 is an iPhone 17 Pro rotated. The two overlays are anchored independently — the card
     // from the top, the panel from the bottom — so on a short viewport they used to overlap by
