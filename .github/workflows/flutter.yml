@@ -134,10 +134,30 @@ jobs:
       - run: flutter pub get
       - run: dart run tool/sync_web_assets.dart
       - run: flutter build windows --release
+      # The distribution archive, built and proven here because there is no Windows hardware
+      # locally — same reason the Linux .deb is only ever built in CI.
+      - name: Package the distribution archive
+        run: windows\packaging\build-zip.ps1
+        shell: pwsh
+      # A zip that unpacks but cannot find its Mol* assets would look fine above and fail on the
+      # first user's machine, so unpack it somewhere else entirely and launch that copy.
+      - name: Unpack it and launch the unpacked copy
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist\molapp-*-windows-x64.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath $env:TEMP\molapp-dist -Force
+          if (-not (Test-Path $env:TEMP\molapp-dist\data\flutter_assets\assets\web\viewer.html)) {
+            throw 'viewer.html missing from the archive'
+          }
+          $p = Start-Process $env:TEMP\molapp-dist\molapp.exe -PassThru
+          Start-Sleep -Seconds 20
+          # Still running after 20s is the pass; a crash on the WebView2 path exits well before that.
+          if ($p.HasExited) { throw "molapp.exe exited with $($p.ExitCode)" }
+          Stop-Process -Id $p.Id
       - uses: actions/upload-artifact@v4
         with:
           name: molapp-windows-x64
-          path: flutter_app/build/windows/x64/runner/Release
+          path: flutter_app/dist/molapp-*-windows-x64.zip
 
   apple:
     runs-on: macos-latest
@@ -152,8 +172,32 @@ jobs:
       - run: flutter config --no-enable-swift-package-manager
       - run: flutter pub get
       - run: dart run tool/sync_web_assets.dart
+      # The one seam unit tests cannot reach: Dart → WKWebView → viewer.html → Mol* → back.
+      # One file per step, not the directory: a single `flutter test integration_test -d macos`
+      # fails on the second file with "Unable to start the app on the device" — macOS desktop
+      # cannot relaunch the app within one invocation.
+      - run: flutter test integration_test/viewer_bridge_test.dart -d macos
+      - run: flutter test integration_test/measure_pick_test.dart -d macos
       - run: flutter build macos --release
       - run: flutter build ios --release --no-codesign
+      - name: Package the distribution image
+        run: macos/packaging/build-dmg.sh
+      # An image that mounts but ships an app without its Mol* assets would look fine above and
+      # fail on the first user's machine, so the mounted copy is the one launched.
+      - name: Mount it and launch the mounted copy
+        run: |
+          hdiutil attach dist/molapp-*-macos.dmg -nobrowse -mountpoint /tmp/molapp-dmg
+          test -f "/tmp/molapp-dmg/MolApp.app/Contents/Frameworks/App.framework/Resources/flutter_assets/assets/web/viewer.html"
+          /tmp/molapp-dmg/MolApp.app/Contents/MacOS/MolApp &
+          pid=$!
+          sleep 20
+          # Still running after 20s is the pass; a broken WKWebView path exits well before that.
+          kill -0 "$pid"
+          kill "$pid"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: molapp-macos
+          path: flutter_app/dist/molapp-*-macos.dmg
 
   android:
     runs-on: ubuntu-latest

@@ -15,3 +15,4 @@ MolApp.xcodeproj/xcuserdata/
 __pycache__/
 *.pyc
 linux/dist/
+flutter_app/dist/
