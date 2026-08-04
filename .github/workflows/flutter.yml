@@ -38,7 +38,10 @@ jobs:
       - run: flutter test
 
   linux:
-    # NON-BLOCKING, and expected to fail: the Linux target cannot currently build at all, anywhere.
+    # NON-BLOCKING, and expected to fail: the Flutter Linux target cannot build at all, anywhere.
+    # Linux itself is not unsupported — it ships as the GTK/WebKitGTK shell in `linux/`, which the
+    # `linux` workflow builds and tests for real on stock ubuntu-latest packages. This job only
+    # tracks whether the *Flutter* route ever becomes viable.
     #
     # flutter_inappwebview_linux 0.1.0-beta.1 — the only version ever published — compiles against
     # WPE WebKit 2.40+ (WebKitScriptMessageReply, WebKitNetworkSession,

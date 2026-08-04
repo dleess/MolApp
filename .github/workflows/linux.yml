@@ -1,0 +1,45 @@
+# The GTK/WebKitGTK Linux shell. Unlike the Flutter `linux` job — which cannot pass anywhere,
+# because its plugin needs WPE WebKit 2.40+ and no Ubuntu ships WPE at all any more — this one runs
+# the real viewer on stock ubuntu-latest packages, headless under Xvfb.
+#
+# No step consumes attacker-controllable event data; there is no interpolation at all.
+name: linux
+
+on:
+  push:
+    branches: [master]
+    paths: ['linux/**', 'MolApp/Resources/**', '.github/workflows/linux.yml']
+  pull_request:
+    paths: ['linux/**', 'MolApp/Resources/**', '.github/workflows/linux.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: linux
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK, WebKitGTK and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 python3-pil \
+            xvfb libgl1-mesa-dri
+        working-directory: .
+      - name: Compile-check every module
+        run: python3 -m compileall -q molapp tests
+      # The unit tests need no display; the smoke test boots the real WebKitGTK view and the real
+      # Mol* bundle under Xvfb, which is what actually proves the platform is wired end to end.
+      - name: Test
+        run: xvfb-run -a python3 -m unittest discover -s tests -v
+        env:
+          # Xvfb has no GPU; WebKit must not insist on hardware acceleration or the web process
+          # dies on start and every viewer command times out.
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
