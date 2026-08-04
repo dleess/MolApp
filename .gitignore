@@ -10,3 +10,7 @@ xcuserdata/
 # Xcode user-specific workspace state
 MolApp.xcodeproj/project.xcworkspace/xcuserdata/
 MolApp.xcodeproj/xcuserdata/
+
+# Python (linux/ shell)
+__pycache__/
+*.pyc

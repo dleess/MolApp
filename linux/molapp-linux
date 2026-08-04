@@ -1,0 +1,4 @@
+#!/bin/sh
+# MolApp for Linux — runs the GTK shell straight from this checkout.
+here=$(dirname "$(readlink -f "$0")")
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m molapp "$@"

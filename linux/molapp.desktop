@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=MolApp
+GenericName=Molecule Viewer
+Comment=Mol*-powered molecular structure viewer
+# Points at the launcher in this checkout; edit the path (or drop molapp-linux on PATH) before
+# copying this file to ~/.local/share/applications/.
+Exec=molapp-linux
+Icon=applications-science
+Terminal=false
+Categories=Science;Chemistry;Biology;Education;
+MimeType=chemical/x-pdb;chemical/x-mmcif;
+StartupWMClass=molapp
