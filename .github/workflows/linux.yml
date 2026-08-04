@@ -71,7 +71,12 @@ jobs:
           WEBKIT_DISABLE_COMPOSITING_MODE: '1'
           LIBGL_ALWAYS_SOFTWARE: '1'
       - name: Launch the installed app
-        run: xvfb-run -a timeout 20 molapp; test $? -eq 124
+        # 124 is the pass: the app is still running when timeout stops it. `|| status=$?` keeps the
+        # step's `set -e` from treating that expected non-zero exit as a failure.
+        run: |
+          status=0
+          xvfb-run -a timeout 20 molapp || status=$?
+          test "$status" -eq 124
         env:
           WEBKIT_DISABLE_COMPOSITING_MODE: '1'
           LIBGL_ALWAYS_SOFTWARE: '1'
