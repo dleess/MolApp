@@ -19,7 +19,12 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Prefer whatever `molapp` is already importable — that is how the same suite can be run against
+# the installed .deb (PYTHONPATH=/usr/lib/molapp) rather than this checkout.
+try:
+    import molapp  # noqa: F401
+except ModuleNotFoundError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import gi  # noqa: E402
 

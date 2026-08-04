@@ -14,3 +14,4 @@ MolApp.xcodeproj/xcuserdata/
 # Python (linux/ shell)
 __pycache__/
 *.pyc
+linux/dist/
