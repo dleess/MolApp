@@ -75,6 +75,25 @@ flutter build macos --release
 flutter build apk --release   # and: appbundle, ios, windows, linux
 ```
 
+## Distribution builds
+
+The desktop targets ship as plain archives — nothing to install beyond unpacking, because each build
+tree is already self-contained. Both scripts read the version from `pubspec.yaml` and write to
+`flutter_app/dist/` (gitignored), mirroring `linux/packaging/build-deb.sh`.
+
+```sh
+flutter build macos --release && macos/packaging/build-dmg.sh      # dist/molapp-<v>-macos.dmg
+flutter build windows --release; windows\packaging\build-zip.ps1   # dist/molapp-<v>-windows-x64.zip
+```
+
+CI builds both on every push, uploads them as artifacts, and proves each one by unpacking it
+elsewhere and launching *that* copy — a package that unpacks but cannot find its Mol\* assets would
+pass a plain build and fail on the first user's machine. Neither is code-signed, so macOS Gatekeeper
+and Windows SmartScreen both warn on first launch.
+
+iOS and Android keep their store pipelines (`flutter build ipa` / `appbundle`); Linux keeps the GTK
+shell's `.deb`.
+
 ## Tests
 
 ```sh
@@ -113,9 +132,11 @@ used. Without them the release build falls back to debug keys so `flutter run --
   a `Listener` (`molstar_web_view.dart`), but whether those events survive the platform view has not
   been checked on real iPad hardware. Mouse hover on desktop works through an injected `pointermove`
   listener and needs nothing from Flutter.
-- **Windows and Linux are built by CI, not by hand.** No local hardware;
-  `../.github/workflows/flutter.yml` builds both. Neither has been *run*, so the viewport, gestures
-  and the file dialogs are unproven there.
+- **Windows is built and launched by CI, not by hand.** No local hardware. The `windows` job now
+  unpacks the distribution archive and starts `molapp.exe` from it, so the app is known to come up
+  and stay up — but nothing drives it: the viewport, gestures and the file dialogs are still unproven
+  there. (The Flutter *Linux* target cannot build anywhere — see the note on that job. Linux ships as
+  the GTK shell in `../linux/`, which its own workflow runs headless under Xvfb.)
 - **Foldables.** Flutter's default `configChanges` is a superset of the attribute PR #17 added for
   the Samsung Flip, and the webview lives inside the Flutter view rather than being rebuilt in
   `onCreate`, so that class of bug should be gone — but this was not re-tested on real Flip hardware.
