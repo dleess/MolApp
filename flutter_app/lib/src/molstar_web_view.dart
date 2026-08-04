@@ -54,6 +54,32 @@ const String _bridgeUserScriptSource = '''
 })();
 ''';
 
+/// Settings for the viewer webview. The Mol* canvas owns every gesture: no page scrolling,
+/// bouncing or double-tap zoom.
+///
+/// On Android the plugin implements `disable*Scroll` with an `OnTouchListener` that consumes every
+/// `ACTION_MOVE` when both are set (InAppWebView.java), so the page never receives `touchmove` and
+/// one-finger rotation is dead. viewer.html already pins scrolling itself (`overflow: hidden`,
+/// `touch-action: none`, `user-scalable=no`), so Android skips the flags.
+@visibleForTesting
+InAppWebViewSettings viewerWebViewSettings() {
+  final isAndroid = defaultTargetPlatform == TargetPlatform.android;
+  return InAppWebViewSettings(
+    isInspectable: kDebugMode,
+    disableVerticalScroll: !isAndroid,
+    disableHorizontalScroll: !isAndroid,
+    disallowOverScroll: true,
+    supportZoom: false,
+    builtInZoomControls: false,
+    javaScriptCanOpenWindowsAutomatically: false,
+    allowsBackForwardNavigationGestures: false,
+    // molstar.js is loaded relative to viewer.html on a file:// URL.
+    allowFileAccessFromFileURLs: true,
+    allowUniversalAccessFromFileURLs: true,
+    transparentBackground: false,
+  );
+}
+
 /// The Mol* viewport. Hosts viewer.html in the platform webview and wires it to [bridge].
 class MolStarWebView extends StatefulWidget {
   const MolStarWebView({super.key, required this.bridge});
@@ -81,21 +107,7 @@ class _MolStarWebViewState extends State<MolStarWebView> {
       },
       child: InAppWebView(
         initialFile: kViewerAssetPath,
-        initialSettings: InAppWebViewSettings(
-          isInspectable: kDebugMode,
-          // The Mol* canvas owns every gesture: no page scrolling, bouncing or double-tap zoom.
-          disableVerticalScroll: true,
-          disableHorizontalScroll: true,
-          disallowOverScroll: true,
-          supportZoom: false,
-          builtInZoomControls: false,
-          javaScriptCanOpenWindowsAutomatically: false,
-          allowsBackForwardNavigationGestures: false,
-          // molstar.js is loaded relative to viewer.html on a file:// URL.
-          allowFileAccessFromFileURLs: true,
-          allowUniversalAccessFromFileURLs: true,
-          transparentBackground: false,
-        ),
+        initialSettings: viewerWebViewSettings(),
         initialUserScripts: UnmodifiableListView<UserScript>(<UserScript>[
           UserScript(
             source: _bridgeUserScriptSource,
