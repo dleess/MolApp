@@ -114,7 +114,14 @@ class ViewerBridgeSmokeTests(unittest.TestCase):
         obj = self.window.bridge.objects[0]
         self.assertEqual(obj.name, "MINI.pdb")
         self.assertEqual(obj.type, MolAppObjectType.structure)
-        self.assertEqual(self.window.controller.status_message, "Loaded MINI.pdb")
+
+        # The status line follows the command *result*, which is a separate message from the
+        # objectsReplaced event above and can land a turn later — so wait for it rather than
+        # assuming the two arrive together.
+        self.assertTrue(
+            pump_until(lambda: self.window.controller.status_message == "Loaded MINI.pdb"),
+            f"status stuck at {self.window.controller.status_message!r}",
+        )
 
     def test_03_a_per_object_command_lands(self) -> None:
         name = self.window.bridge.objects[0].name
