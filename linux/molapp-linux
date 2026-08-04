@@ -1,4 +1,10 @@
 #!/bin/sh
 # MolApp for Linux — runs the GTK shell straight from this checkout.
+#
+# PyGObject ships as a distro package, not from pip, so a conda or venv python3 first on PATH
+# usually cannot import it. Fall back to the system interpreter, which is where python3-gi lives.
+# Override with MOLAPP_PYTHON=/path/to/python3.
 here=$(dirname "$(readlink -f "$0")")
-PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m molapp "$@"
+python=${MOLAPP_PYTHON:-python3}
+"$python" -c 'import gi' 2>/dev/null || python=/usr/bin/python3
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec "$python" -m molapp "$@"
