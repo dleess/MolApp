@@ -1,262 +1,134 @@
-# HANDOFF: every platform verified; the last two known defects fixed
+# HANDOFF: Android touch rotation fixed and shipped as 1.1.4 (build 14) — in Play review
 
-**Written:** 2026-07-27 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `master` — the fixes below and this file land together
+**Written:** 2026-08-04 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `master` (clean; PR #36 merged as `851555e`)
 
-> Replaces the previous HANDOFF (`git show 19cdea2:HANDOFF.md`). **The store-submission state has
-> not been re-checked since 2026-07-26 morning** — see `git show a52c114:HANDOFF.md`, valid as of
-> then.
+> Replaces the 2026-07-27 HANDOFF (`git show fa1cf8e:HANDOFF.md`). That file's **"Next steps" backlog is still
+> open and unstarted** — accessibility of the objects panel, Help undiscoverable on iPhone portrait, the
+> landscape left-rail scroll, Mol\* chrome leaking, measure-banner contrast. Read it if you pick any of those up.
 
 ## Goal
 
-Nothing is in flight. The visual-QA backlog under "Next steps" is what remains, and none of it is
-started.
+Report: "Android에서 터치로 molecule이 회전이 안 된다." Done = rotation works, verified on the emulator,
+uploaded to Google Play, and submitted for review.
 
-Acceptance for anything picked up: `cd flutter_app && flutter analyze` clean and `flutter test`
-→ 116 passing, plus device evidence for anything that changes layout or colour.
+**All of that is done.** Nothing is in flight.
 
 ## Status
 
-**Nothing is in flight.** No debugging leftovers in `flutter_app/`.
+- Fix merged to `master` (`851555e`, PR #36). Working tree clean, no debugging leftovers.
+- `cd flutter_app && flutter analyze` → `No issues found!`; `flutter test` → **122 passing** (was 120; 2 new).
+- All five CI jobs passed on #36 (run `30865531304`).
+- Play Console: **Closed testing "Alpha", release 7 = `14 (1.1.4)`, "Changes in review"** as of 2026-08-04
+  ~09:55. Quick checks were running with ~13 min remaining; changes are sent to review automatically once
+  they pass. Not verified past that point.
 
-Merged, in order:
+## The bug and its root cause
 
-| PR | Commit | What |
+`flutter_inappwebview`'s Android `OnTouchListener` returns `true` for **every** `ACTION_MOVE` when
+`disableHorizontalScroll` **and** `disableVerticalScroll` are both set:
+
+```java
+// ~/.pub-cache/hosted/pub.dev/flutter_inappwebview_android-1.2.0-beta.3/android/src/main/java/
+//   com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebView.java:556-557
+if (customSettings.disableHorizontalScroll && customSettings.disableVerticalScroll) {
+  return (event.getAction() == MotionEvent.ACTION_MOVE);
+}
+```
+
+Consuming the event means the WebView never delivers `touchmove` to the page, so the Mol\* camera has nothing
+to act on. Taps still worked (that is why a click could still focus a residue) — only drags died. iOS uses a
+different scrollView path and was never affected.
+
+**Fix** (`flutter_app/lib/src/molstar_web_view.dart`): the settings moved into a new
+`viewerWebViewSettings()` (`@visibleForTesting`) that drops both flags on Android only —
+`disableVerticalScroll: !isAndroid`. `viewer.html` already pins scrolling itself (`overflow: hidden`,
+`touch-action: none`, `user-scalable=no`), so nothing scrolls that shouldn't. **[still applied]**
+
+## Evidence (API 36 emulator `test36`, 1CRN loaded, drag `adb shell input swipe 700 1500 300 1200 900`)
+
+| build | `touchmove` reaching the canvas | viewport pixels changed |
 | --- | --- | --- |
-| #23 | `5a82f3b` | `SafeArea` for the chrome + `_menuBarTop()` for iPadOS window controls; PDF export crash, unvalidated hex colours, stale command bar, enums drop their `raw` field |
-| #24 | `894cc74` | `ChromeTokens` — the chrome's palette and type sizes in one file, then the drift collapsed |
-| #25 | `9decf0f` | previous HANDOFF |
-| #26 | `c0397ac` | the windows CI job compiles for the first time |
-| #27 | `ccb9391` | linux diagnosed as unbuildable and made non-blocking |
-| #28 | `19cdea2` | previous HANDOFF |
-| this | — | the two defects below, found by the verification sweep |
+| fixed | 108 | 19.8% (and 18.79% on a second run after reinstall) |
+| flags restored (deliberately reverted, then rebuilt) | **0** | **0.00%** |
 
-**All five CI jobs now pass, and PRs no longer need `--admin`.** That was true for the first time on
-#27. Note the repo has **no branch protection at all** (private repo, free plan — the API returns
-403 for the feature), so `--admin` was only ever bypassing `gh`'s own refusal to merge on failing
-checks.
-
-## Verified on real devices (2026-07-26/27)
-
-This closes the previous handoff's largest open risk — "the token consolidation changes pixels on
-purpose and has NOT been looked at on a real device".
-
-The `molapp-windows-x64` artifact from CI run `30212788301` was run on the local Windows 11 VM.
-Sampling the screenshot's pixels against the values computed when the tokens were chosen:
-
-| element | measured | expected |
-| --- | --- | --- |
-| panel scrim (all four panels) | (2, 2, 3) | (2, 2, 3) |
-| `structure` type line | (167,167,167) | textSecondary 0.65 → (166,166,167) |
-| unselected chip `Sur` | (167,167,167) | textSecondary 0.65 |
-| object name `1CRN` | (255,255,255) | textPrimary 1.0 |
-| selected chip fill | (65, 65, 66) | chipSelectedFill 0.25 → (65,65,66) |
-| colour swatch | (78, 78, 79) | swatchFallback 0.3 → (78,78,79) |
-
-So the golden renders predicted the real device exactly, and the five-scrim drift really is gone.
-
-Also confirmed on Windows, none of it previously exercised on that platform:
-
-- **WebView2 → WebGL → Mol\* renders.** 1CRN draws. This was the biggest unknown, since
-  `flutter_inappwebview_windows` is `0.7.0-beta.3`.
-- **PDF export works end to end** — `Saved molecule.pdf`. That is #23's fix (the PDF branch used to
-  cast `document.save()` to `List<int>` and throw). The save dialog appearing already proves the
-  encode succeeded, because `bytes: await encodeExport(...)` is evaluated before `deliverFile` opens
-  the dialog.
-- The command bar clears after a run (#23's `notifyListeners()`), and Load PDB enables once the
-  field has content.
-- `SafeArea` is a no-op on desktop, as designed.
-- Mol\*'s own control strip leaks at the right edge here too — no platform is exempt.
-
-**Not exercised on Windows:** measure mode, state save/open, Print, export formats other than PDF.
-
-### The verification sweep that closed the last three gaps
-
-**Soft keyboard — PASS on both platforms it exists on.** It had never been verified because the
-Simulator's `I/O ▸ Keyboard ▸ Connect Hardware Keyboard` was checked; no capture could ever have
-shown a keyboard. Uncheck it with a System Events click on the *Simulator process menu bar* — a
-blind Cmd+K goes to whatever app is frontmost and did exactly that on 2026-07-26.
-- iOS: keyboard from 565.0pt, command-bar border 541.3pt -> **23.7pt visible clearance**, which is
-  the `bottom: 24` in `_commandBar`. The Scaffold shrinks to 583pt, above the ~446pt overlap
-  threshold, so nothing collides.
-- Android: IME top 577.5dp, bar 491.8..553.9dp -> **23.6dp**. Force the IME with
-  `adb shell settings put secure show_ime_with_hard_keyboard 1` (restore it to 0 afterwards).
-- macOS/Windows/Linux: **N/A**, not untested — there is no soft-keyboard surface and
-  `viewInsets.bottom` is always 0. Corroborated incidentally by the Windows VM run.
-
-**iPhone landscape gutters — confirmed, and both are ~62pt.** The menu bar's background strip is
-inset by the safe area while its labels sit correctly, leaving a gutter on *both* sides:
-leading 61.8pt, trailing 62.3pt, which is exactly iOS's landscape horizontal inset on Dynamic
-Island iPhones. An earlier report of "~17pt trailing" was wrong — it measured to the Simulator's
-floating side-button overlay (x 1569..1628), not the screen edge. Measure by **exact colour match
-to the scrim token (2,2,3)**, never a brightness sum: bezel-black and scrim-black both fall under
-any sane threshold, and a sum-based scan produced -5.0pt.
-
-**Windows — all four untested paths now pass at artifact level.** measure mode (7.17 Å, palette
-pixel-checked against Okabe-Ito), state save+open (`~/Desktop/molecule.molapp` parses as JSON),
-Print, and every export format. All five exports decode: PNG/JPEG/GIF 2530x1364, SVG's embedded
-base64 PNG byte-identical to the PNG, PDF `%PDF-1.5` with `/MediaBox` and a matching raster.
-Print produced `~/Documents/molappsave.pdf`, A4 `/MediaBox`, `/Producer Microsoft: Print To PDF`,
-`/Title MolApp` — and `/Title` is the clincher, because `Printing.layoutPdf(name: 'MolApp')` sets
-the spooler job name, so a Windows print job called MolApp cannot exist unless the plugin started
-it. In `printing`, `StartDoc` is reached only from `OnLayoutResult::SuccessInternal`, so the job's
-existence *proves* `onLayout` ran.
-
-## The two defects that sweep found, both now fixed
-
-**D1 — a cancelled export used to report success.** `exportImage` did
-`updateStatus(status ?? 'Exported ${format.title}')`, but `deliverFile` returns null **only** from
-its cancel branch (`export.dart`, `if (location == null) return null;`); a real save returns
-`'Saved <basename>'` and the mobile path `'Shared <name>'`. So dismissing the dialog announced a
-file that was never written. `saveState`, three methods away, always had `?? kIdleStatus`.
-Introduced in #21, not #23. Now matches `saveState`.
-Tested by replacing `FileSelectorPlatform.instance` with a fake whose `getSaveLocation` returns
-null — exactly what dismissal reports. `file_selector_platform_interface` was already a transitive
-dependency and is now declared dev-only; **no production seam was added**.
-
-**D2 — the info card and objects panel overlapped by 88pt in landscape.** They were anchored
-independently, the card from the top and the panel from the bottom, so on a 402pt-tall viewport the
-panel painted over Open Structure, the PDB field and Load PDB. They now share one `_leftRail()`:
-a single `Positioned` holding `LayoutBuilder > SingleChildScrollView > ConstrainedBox(minHeight:
-constraints.maxHeight) > Column(spaceBetween)`. On a tall screen the natural height is under the
-minimum, so the column fills the rail and `spaceBetween` reproduces the old positions exactly; on a
-short one the column takes its natural height and the rail scrolls rather than overlapping.
-Note the audit had filed this as "reachable by dragging a macOS window small" — it fired on a plain
-phone rotation. It is pre-existing, but #23's 21pt bottom inset did worsen it from 68pt to 88pt.
+Scale is identical before/after and the axis gizmo rotates with the scene, so it is rotation, not zoom.
+The user independently confirmed rotation on the emulator ("확인 했슴. 방향 바뀜").
 
 ## What worked
 
-- **`gh pr merge <n> --squash --delete-branch`** — no `--admin` needed since #27.
-- **Running two candidate CI fixes as a matrix in one round** instead of guessing across two blind
-  round-trips. That is how the windows fix was chosen, and it settled an unverified hypothesis
-  (cl.exe honours the `CL` environment variable even when msbuild drives the build). Collapse the
-  matrix before merging.
-- **Golden-image diffing for colour work.** `flutter test` renders text as boxes, but every colour,
-  alpha and border is exact. The token extraction was proven byte-identical this way before the
-  consolidation was allowed to change anything — and the Windows measurements above then confirmed
-  the goldens were faithful.
-- **Choosing alpha values by computing WCAG contrast over all five `backgroundPresets`** rather than
-  by eye.
-- **Reverting a fix to prove its test fails without it.**
-- **Reading the artifact instead of rebuilding.** CI uploads `molapp-windows-x64`, so the Windows
-  binary can be run on the VM with no toolchain installed in the guest. A copy is at
-  `~/Downloads/molapp-windows-x64/` (41 MB, 26 files) — outside git, delete freely.
-- **Android**: SDK at `~/Library/Android/sdk`, **not on `PATH`**. AVD `test36` is API 36. Package id
-  is `com.donghan.molapp` (lowercase; the iOS bundle id is `com.donghan.MolApp`). `adb shell monkey`
-  silently fails — use `adb shell am start -W -n com.donghan.molapp/.MainActivity`.
+- **Instrumenting the JS bridge to find the failing layer.** A temporary listener in
+  `_bridgeUserScriptSource` logging `console.log('MOLDBG ' + t)` for touch/pointer events, read back with
+  `adb logcat -d | grep MOLDBG`, proved the moves reach `target=CANVAS` after the fix and never arrive
+  before it. **[reverted — the instrumentation is gone from the merged code]**
+- **Reverting the fix and rebuilding to prove causality** (0 moves, 0 pixels). This is what produced the
+  table above. **[reverted — the fix is back in place and merged]**
+- **Pixel-diffing two `adb exec-out screencap -p` captures** over the viewport crop `(0,950)-(1080,1750)`
+  with a per-channel-sum threshold of 12. Binary, no eyeballing.
+- **Native macOS file dialog: type the path one character at a time.** See below — this is the only method
+  that worked.
 
 ## What didn't work
 
-- **The Linux target cannot be built at all, anywhere.** `flutter_inappwebview_linux 0.1.0-beta.1`
-  (the only version ever published) compiles against WPE WebKit 2.40+ API
-  (`WebKitScriptMessageReply`, `WebKitNetworkSession`, `webkit_network_session_get_default`) and
-  libsoup3. **No Ubuntu release has ever shipped WPE WebKit 2.40 or newer**: jammy is the only one
-  carrying WPE at all, at 2.36, and every release after it dropped the packages entirely — 24.04 has
-  none. Waiting for `ubuntu-latest` to advance makes it worse. The job is `continue-on-error` on its
-  build step and documented in the workflow. **[applied, on master]**
-- **`prlctl` cannot control the VM** — `resume` returns *"available only in Parallels Desktop for Mac
-  Pro or Business Edition"*. The installed edition is Standard, so no headless resume and no
-  `prlctl exec` into the guest.
-- **System Events synthetic clicks do not reach the Parallels guest.** Two attempts, correct
-  coordinates, no effect — not even a change of desktop selection. Same failure mode as the Flutter
-  macOS app (below). Driving the guest needs a human, or a CGEvent-based tool such as `cliclick`
-  (not installed; would need consent).
-- **Synthetic input does not reach the Flutter macOS app either.** System Events `click at` +
-  `keystroke` was accepted (window resize via System Events works) but text never landed. Use the
-  iOS Simulator or Android emulator for interaction testing.
-- **A locked Mac** makes `screencapture` return `could not create image from rect`, `osascript ...
-  activate` unable to foreground anything, and System Events report 0 windows for a running app.
-  That is the display, not a bug. It blocked all macOS and VM work for a stretch on 2026-07-26.
-- **`ui_describe_all` returns `DockFolderViewService`** instead of the app when an iPad simulator is
-  in iPadOS 26 windowed mode. Fall back to pixel measurement and screen-space taps.
-- **Job-level `continue-on-error` does not unblock merges** — the check still reports failure and the
-  PR stays `UNSTABLE`. It has to sit on the step.
-- **`idb`'s `ui_swipe` does not reliably drive a Flutter scroll view.** Two attempts on the
-  landscape rail moved nothing; a `tester.drag` in a widget test proved the same rail scrolls fine
-  (Objects 320 -> 240). Prove scrollability in a widget test, not with a simulator gesture.
-- **`simctl io screenshot` always writes the device's NATIVE-orientation framebuffer.** A rotated
-  device looks portrait in it. Capture the Simulator *window* from the Mac screen instead.
-- **The Parallels VM window is not reachable through System Events** — `count of windows` flips
-  between 0 and 2 and never names the VM display. What works is `open -a "Parallels Desktop 2"`
-  then a full-screen `screencapture`; do not try to compute a window rect. Cmd+Opt+H backfires: it
-  hides Parallels too once Finder is frontmost.
-- **`dart format` on a single file reindents unrelated code.** There is no formatter config and the
-  codebase wraps at 102, not 80. Dedent by line surgery instead; the D2 fix is 36+/14- of substance
-  with the rest pure re-indentation.
-- **Measure light/dark bands by row-wide fraction, and colour by exact token match.** A single
-  centre-column brightness probe hits text glyphs and reports a false edge; a brightness *sum*
-  cannot tell bezel-black `(1,0,0)` from scrim-black `(2,2,3)` and produced a nonsensical -5.0pt.
-- **`dart format` must not be run** — no config, so its default 80 columns would reformat every file;
-  the codebase wraps at 102. Wrap long lines by hand.
-- **`flutter test` from the repo root** fails with `Test directory "test" not found.` Run it from
-  `flutter_app/`.
-- **A regression test that asserted the wrong relation.** `banner.top >= menuBar.top` passed even
-  with its fix reverted; the shipped version is `banner.top >= file.bottom`, which fails at
-  `Expected: >= 110.0 / Actual: 66.0`. Re-verify by reverting if you touch it.
+- **The Chrome the session was attached to was the wrong browser.** Two browsers are connected: `Browser 1`
+  (`ce25cb43-39d7-4290-b791-91f1c2c27fb7`, macOS, local) and `Browser 2`
+  (`c060c9ce-1ce0-4e06-a928-c53a2284e94c`, Linux, remote). The session defaulted to the **Linux** one, so
+  clicking Upload opened a file dialog that no local AppleScript could see and the Play Console tab never
+  appeared in the local Chrome's tab list. `list_connected_browsers` → ask the user → `select_browser` with
+  the macOS deviceId. **Check this first next time.**
+- **`mcp__claude-in-chrome__file_upload` cannot be used for an AAB** — it caps the combined payload at 10 MB
+  and the bundle is 55.1 MB. The native dialog is the only route.
+- **Fast synthetic typing into the macOS open panel silently drops characters.** `keystroke "/Users/dongha…"`
+  in one call produced `/e/Downloads/molapp-1.1.4-14.aab`. Type character-by-character with a `delay 0.08`
+  between them and it lands perfectly.
+- **`keystroke "a" using {command down}` then Delete does not clear that panel's field.** Press
+  `key code 51` ~90 times instead.
+- **`entire contents of sheet 1` exposes no settable text field for the Go-to-folder panel**, and
+  `set value of` on it errors with *"Can't make item 1 … into type specifier"*. There are no AX `buttons`
+  either. AX inspection is useful for *finding* things, not for driving this dialog.
+- **Two Returns after typing the path overshoots** — it lands on `Macintosh HD`. Exactly **one** Return
+  selects the file (Open lights up), then one more Return presses Open.
+- **`System Events` clicks and type-ahead do not reach the open panel's file list.** `click at {x,y}` on a
+  row, then typing the filename, selected nothing.
+- **A `Bash` tool timeout killed the emulator.** The foreground `adb shell ping` hit the 2-minute limit and
+  SIGTERM took the emulator with it. Launch it detached: `nohup … & disown`, not via `run_in_background`
+  alongside long foreground commands.
+- **Swiping near the right screen edge (x≈1000 of 1080) does nothing** — Android gesture navigation eats it
+  as a back gesture. Drag through the middle of the screen.
+- **The user's own emulator test failed at one point and it was my fault** — the last APK installed was the
+  deliberately-reverted build. After any revert-to-prove experiment, **reinstall the fixed build before
+  telling anyone to look.**
 
 ## Key files & commands
 
-- `flutter_app/lib/src/tokens.dart` — `ChromeTokens`. **Read its doc comment before changing a
-  value**; it records what was consolidated, what was not, and why.
-- `flutter_app/lib/src/viewer_page.dart` — the whole UI. Holds `_menuBarTop()` and the `SafeArea`
-  around the five chrome overlays. The viewport and hover tooltip are deliberately **outside** it —
-  the tooltip's coordinates come from the webview and are in un-inset space.
-- `MolApp/Resources/viewer.html` — the Mol\* viewport, single source of truth for all shells. Run
-  `cd flutter_app && dart run tool/sync_web_assets.dart` after editing; the copies under
-  `flutter_app/assets/web/` and `android/app/src/main/assets/` are generated.
-- `.github/workflows/flutter.yml` — the windows job carries
-  `CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS` (drop it when the plugin moves to
-  C++20 `<coroutine>`); the linux job carries the jammy pin, `CXXFLAGS`, a pkg-config listing step
-  and the step-level `continue-on-error`, all of which are load-bearing for the diagnosis.
-- `cd flutter_app && flutter analyze` → `No issues found!`
-- `cd flutter_app && flutter test` → `All tests passed!`, 113 tests.
-- `gh run download <run-id> -n molapp-windows-x64 -D <dir>` — the Windows binary without a Windows
-  toolchain. In the VM it is reachable at `\\Mac\Home\Downloads\...` via the `Mac Files` shortcut.
+- `flutter_app/lib/src/molstar_web_view.dart` — `viewerWebViewSettings()` holds the platform split; its doc
+  comment records why. `_bridgeUserScriptSource` is where instrumentation goes if this needs debugging again.
+- `flutter_app/test/molstar_web_view_test.dart` — 2 tests pinning the flags per platform via
+  `debugDefaultTargetPlatformOverride`. Revert the fix and they fail.
+- `cd flutter_app && flutter analyze` → `No issues found!` · `flutter test` → 122 passing (run from
+  `flutter_app/`, not the repo root).
+- Emulator: SDK at `~/Library/Android/sdk` (**not on `PATH`**), AVD `test36` (API 36), package
+  `com.donghan.molapp`, launch with `adb shell am start -W -n com.donghan.molapp/.MainActivity`.
+  `adb shell monkey` silently fails.
+- Release build: `cd flutter_app && flutter build appbundle --release` → 55.1 MB at
+  `build/app/outputs/bundle/release/app-release.aab`. Version lives in `flutter_app/pubspec.yaml`
+  (`version: 1.1.4+14`).
+- Play Console credentials/account details are in the `molapp-play-store-status` memory, not in the repo.
+  Account slot **u/0** was correct today (u/1 is kbsi.bionmr and hits a ToS gate).
 
 ## Next steps
 
-None started. Ordered by user harm:
-
-1. **Objects panel accessibility.** Zero `Semantics` wrappers, so the eye, colour swatch and
-   Rib/Sur/Stk/B+S/Sph chips are exposed as `StaticText` and **VoiceOver cannot operate the panel**.
-   Touch targets there are 15x15, 14x14 and ~27x20 pt against a 44pt minimum. This is now the
-   largest known user-facing problem.
-2. **Help is undiscoverable on iPhone portrait.** Reachable only by an undiscoverable horizontal
-   swipe of the menu row, with a `{{0,0},{0,0}}` accessibility frame, and it is the only route to
-   the Manual. Note this is **portrait-only**: in landscape `isCompact` is false (874 >= 700) so all
-   six menus lay out, Help at `{{478.17,14},{64,48}}`.
-3. **The left rail needs a scroll in landscape.** Fixing the overlap (below) left a residual: with
-   the 21pt bottom inset the rail is 161pt against a 191pt info card, so on a rotated phone the
-   card's last row (PDB ID / Load PDB) is cut off until the rail is scrolled, and there is no scroll
-   affordance. There is genuinely not room for both panels at natural size — 161-182pt of rail
-   against 249pt of content — so something must give; reducing the rail's `bottom: 120` would buy
-   ~24pt but shifts the objects panel on every device, which is a look change and therefore a call
-   for the maintainer.
-4. **Mol\* chrome leaking.** `MolApp/Resources/viewer.html:2291-2305` sets seven viewport flags false
-   but not `ShowReset`, `ShowToggleFullscreen`, `ShowIllumination` or `ShowXR`. Confirmed on every
-   platform including Windows. The axis gizmo also sits behind the command bar below ~660pt, and the
-   `.msp-logo` molstar.org link shows while the scene is empty — the launch state.
-5. **The measure banner's contrast.** 4.1:1 on the default background, 2.6:1 on white. White on
-   Material blue is 3.1:1 at full opacity, so this needs a hue change, not an alpha change. Same for
-   the run button's accent, stock `Colors.blue` while the `ColorScheme` is seeded from Okabe-Ito
-   `#0072B2` — two unrelated blues on screen at once.
+1. **Confirm the review cleared.** Publishing overview for MolApp; it should move from "Changes in review"
+   to available-to-testers. Quick checks were ~13 min out at 09:55 on 2026-08-04.
+2. If a rebuild is ever needed, note the AAB was staged at `~/Desktop/molapp-1.1.4-14.aab` **and**
+   `~/Downloads/molapp-1.1.4-14.aab` (the Downloads copy exists only because the file dialog was already
+   there). Both are outside git; delete freely.
+3. The 2026-07-27 backlog is untouched — see the quote at the top of this file.
 
 ## Open questions / risks
 
-- **The landscape menu-bar gutters are real and stay unfixed** — ~62pt on both sides, now measured
-  on device rather than assumed. Only the strip's background is inset; the labels are correct.
-- **macOS still has no post-token-change screenshot** — it is now the only platform without one,
-  purely because the Mac was locked when it was attempted. `cd flutter_app && flutter build macos
-  --debug` then open `build/macos/Build/Products/Debug/MolApp.app` closes it in minutes.
-- **The Windows 11 touch keyboard on a tablet/2-in-1 is untested.** Flutter Windows does not surface
-  it as `viewInsets`, so the N/A above is sound for a desktop Windows box but not proven for one.
-- **Evidence from these two days lives only in a session scratchpad and will disappear**:
-  `/private/tmp/claude-501/-Users-donghanlee-work-projects-molapp/0e03801c-cc55-469d-9374-fdd862001630/scratchpad/`
-  — `vqa/VISUAL-QA.md` (the full audit: 36 findings that survived adversarial verification, 17
-  refuted), `vqa/FIX-REPORT.md`, ~30 before/after device captures including the Windows ones,
-  `g-orig/` vs `g-final/` golden pairs, and `zz_golden_test.dart.archived` (drop it into
-  `flutter_app/test/` and run with `--dart-define=GOLDEN_DIR=<dir> --update-goldens`). **Nothing in
-  the repo depends on any of it.** Copy what you want to keep.
-- **The 1.1.0 store submissions were not touched or checked on either day.** See
-  `git show a52c114:HANDOFF.md` for their last known state and the submission procedure.
-  Credentials live in the `appstore-connect-creds` and `molapp-play-store-status` memories, not in
-  the repo.
+- **The review outcome is unverified.** Submission succeeded; approval had not happened when this was written.
+- **iOS was not re-tested.** The change is a no-op there by construction (`!isAndroid` keeps the old values)
+  and the widget test pins it, but no iOS device run was done today.
+- **A second Claude Code session was running on this Mac** during the upload and repeatedly stole focus,
+  which is part of why the keystroke work was so flaky. If GUI scripting misbehaves, check for that first.
+- The emulator currently has the **fixed** debug APK installed (verified by the 18.79% rotation run).
