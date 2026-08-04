@@ -42,9 +42,10 @@ payload})` in, command results and events back out.
 cd flutter_app && flutter pub get && dart run tool/sync_web_assets.dart
 flutter run -d macos            # or windows / an android or ios device
 
-# Linux — no build step
+# Linux — no build step; run from the checkout, or install the .deb
 sudo apt-get install -y python3-gi python3-gi-cairo gir1.2-webkit2-4.1 gir1.2-gtk-3.0 python3-pil
 cd linux && ./molapp-linux
+linux/packaging/build-deb.sh && sudo apt-get install -y ./linux/dist/molapp_*.deb
 
 # SwiftUI (iPad)
 xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' build CODE_SIGNING_ALLOWED=NO

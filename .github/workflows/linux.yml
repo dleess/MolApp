@@ -43,3 +43,39 @@ jobs:
           # dies on start and every viewer command times out.
           WEBKIT_DISABLE_COMPOSITING_MODE: '1'
           LIBGL_ALWAYS_SOFTWARE: '1'
+
+  package:
+    # Builds the .deb and then proves it by installing it and running the same suite against the
+    # installed copy — a package that unpacks but cannot find its viewer assets would otherwise
+    # look fine here and fail on the first user's machine.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the package
+        run: packaging/build-deb.sh
+      - name: Install it, with its declared dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./dist/molapp_*.deb
+          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri
+      - name: The installed copy is the one under test
+        run: |
+          cd /tmp
+          PYTHONPATH=/usr/lib/molapp python3 -c 'import molapp; print(molapp.__file__); assert molapp.__file__.startswith("/usr/lib/molapp/")'
+          PYTHONPATH=/usr/lib/molapp python3 -c 'from molapp.webview import viewer_html_path; print(viewer_html_path()); assert viewer_html_path() == "/usr/share/molapp/web/viewer.html"'
+      - name: Test the installed package
+        run: cd /tmp && xvfb-run -a python3 -m unittest discover -s "$GITHUB_WORKSPACE/linux/tests" -v
+        env:
+          PYTHONPATH: /usr/lib/molapp
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+      - name: Launch the installed app
+        run: xvfb-run -a timeout 20 molapp; test $? -eq 124
+        env:
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: molapp-linux-deb
+          path: linux/dist/*.deb

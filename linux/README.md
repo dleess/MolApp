@@ -32,7 +32,25 @@ sudo apt-get install -y python3-gi python3-gi-cairo gir1.2-webkit2-4.1 gir1.2-gt
 Everything else is the Python standard library. There is no build step — `python3-pil` is only used
 by File ▸ Export Display to re-encode the captured PNG as JPEG/GIF/PDF.
 
-## Run
+## Install
+
+```sh
+linux/packaging/build-deb.sh                          # → linux/dist/molapp_1.1.4_all.deb
+sudo apt-get install -y ./linux/dist/molapp_*.deb     # apt pulls the GTK/WebKit dependencies
+molapp
+```
+
+`Architecture: all` — the shell is pure Python and everything native comes from distro packages, so
+there is nothing to compile and one package covers every architecture. It installs the code to
+`/usr/lib/molapp`, the shared web core to `/usr/share/molapp/web` (the third path
+`viewer_html_path()` checks, so the installed app needs no configuration), plus `/usr/bin/molapp`, a
+desktop entry and an icon. `apt-get remove molapp` takes it back out.
+
+CI builds the same package on every change, installs it, and re-runs the whole test suite against
+the *installed* copy — see the `package` job in `.github/workflows/linux.yml`. The built `.deb` is
+attached to that run as an artifact.
+
+## Run from a checkout
 
 ```sh
 cd linux && ./molapp-linux          # or: PYTHONPATH=. python3 -m molapp
@@ -42,15 +60,18 @@ The viewer assets are found automatically: `$MOLAPP_WEB_ROOT`, then `../MolApp/R
 to the checkout, then `/usr/share/molapp/web`. Set `MOLAPP_DEBUG=1` to enable the WebKit inspector
 and echo the page's console to stdout.
 
-`molapp.desktop` is a ready-made launcher entry — point its `Exec=` at `molapp-linux` (or drop that
-script on `PATH`) and copy it to `~/.local/share/applications/`.
+`molapp.desktop` is the launcher entry the package installs. To use it from a checkout instead,
+point its `Exec=` at `linux/molapp-linux` and copy it to `~/.local/share/applications/`.
 
 ## Tests
 
 ```sh
 cd linux
-python3 -m unittest discover -s tests            # 43 logic tests + 8 end-to-end, needs a display
+python3 -m unittest discover -s tests             # 43 logic tests + 8 end-to-end, needs a display
 xvfb-run -a python3 -m unittest discover -s tests # headless (what CI runs)
+
+# against the installed package rather than this checkout
+cd /tmp && PYTHONPATH=/usr/lib/molapp xvfb-run -a python3 -m unittest discover -s ~/MolApp/linux/tests
 ```
 
 - `tests/test_logic.py` — the wire protocol, the selection-expression parser, every command-bar
@@ -73,6 +94,7 @@ xvfb-run -a python3 -m unittest discover -s tests # headless (what CI runs)
 | `molapp/webview.py` | WebKitGTK host, JS runner | `molstar_web_view.dart` / `MolStarWebView.swift` |
 | `molapp/window.py` | the window, chrome and Objects panel | `viewer_page.dart` / `MoleculeViewerView.swift` |
 | `molapp/manual.py` | Help ▸ Manual | `manual_page.dart` / `ManualView.swift` |
+| `packaging/build-deb.sh` | the `.deb` | — |
 
 Enum member names are the wire format viewer.html reads; `tests/test_logic.py` pins them so a
 rename cannot silently change the protocol.
