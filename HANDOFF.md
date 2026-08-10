@@ -1,4 +1,4 @@
-# HANDOFF: Android tablet keyboard-crash fixed (1.1.5+15) — Play production upload in progress
+# HANDOFF: Android tablet keyboard-crash fixed (1.1.5+15) — submitted to Play production review
 
 **Written:** 2026-08-10 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `handoff-refresh` (at `c7dd867`; user chose commit-only, no PR)
 
@@ -14,8 +14,11 @@ submitted for review in the Play Console (managed publishing is off, so it goes 
 
 - **Root cause found and fixed, fix verified on emulator, committed as `c7dd867`** (`fix(android): survive
   WebView renderer death instead of crashing`, bumps `flutter_app/pubspec.yaml` to `1.1.5+15`).
-- Play production upload: **in progress when this was written** — if a later commit updates this line, trust
-  that; otherwise assume the AAB was NOT submitted and start at Next steps 1.
+- Play production upload: **DONE 2026-08-10** — `molapp-1.1.5-15.aab` uploaded to the Production track,
+  release notes `<en-US>Fixed a crash on tablets when the on-screen keyboard opens</en-US>`, saved, and
+  "Submit 1 change for review" confirmed. Publishing overview shows **"Changes in review"** for
+  `15 (1.1.5) — Start full rollout`; quick checks were still running (auto-send on completion, managed
+  publishing off, so it goes live on approval). 1.1.4 went from submission to live the same day.
 - Working tree at write time: clean except this file.
 
 ## The bug and its root cause (verified 2026-08-10)
