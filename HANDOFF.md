@@ -1,11 +1,10 @@
-# HANDOFF: nothing in flight — five platforms build and package; one Play review outcome unconfirmed
+# HANDOFF: Play production release 1.1.4 submitted and in Google review — nothing else in flight
 
-**Written:** 2026-08-04 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `master` (clean, at `727bffe`)
+**Written:** 2026-08-10 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `handoff-refresh` (clean, at `d46aeca` = master `727bffe` + the previous handoff refresh)
 
-> The session that wrote this file did **no work of its own** — it was invoked only to write the handoff.
-> Nothing here is a claim about work done today beyond what is already merged on `master`.
-> This replaces the earlier 2026-08-04 handoff (`git show 033ef04:HANDOFF.md`), which was written at commit
-> `851555e` and therefore predates PRs #38, #39 and #40.
+> The session that wrote this file made **zero repo edits** — its only work was in the Play Console
+> (browser automation) plus updating the `molapp-play-store-status` memory. The working tree is clean.
+> This replaces the 2026-08-04 handoff (committed as `d46aeca`).
 
 ## Goal
 
@@ -23,16 +22,19 @@ across three handoffs (since 2026-07-27).
   | target | shell | distributable | state |
   | --- | --- | --- | --- |
   | iOS | SwiftUI + `WKWebView` (`MolApp/`) | App Store | 0.3 live; 0.4+ to ship (see `molapp-appstore-status` memory) |
-  | Android | Flutter + `flutter_inappwebview` (`flutter_app/`) | Play, closed testing "Alpha" | 1.1.4 (build 14) submitted 2026-08-04 ~09:55 — **outcome unverified** |
+  | Android | Flutter + `flutter_inappwebview` (`flutter_app/`) | Play — **production submitted 2026-08-10, in Google review** | Alpha 14 (1.1.4) verified "Available to selected testers" (released Aug 4 10:22 AM); same bundle promoted to Production |
   | Linux | GTK 3 + WebKitGTK 4.1, pure Python (`linux/`) | `.deb` via `linux/packaging/build-deb.sh` | merged #38/#39, verified on Ubuntu 24.04 |
   | macOS | Flutter (`flutter_app/`) | DMG via `flutter_app/macos/packaging/build-dmg.sh` | merged #40, 1.1.4 DMG mounts and runs |
   | Windows | Flutter (`flutter_app/`) | zip via `flutter_app/windows/packaging/build-zip.ps1` | merged #40; CI unpacks and launches `molapp.exe`, nothing drives the UI there |
 
 ## Next steps
 
-1. **Confirm the Play review cleared.** Version `1.1.4 (build 14)` was in "Changes in review" in closed
-   testing "Alpha" (release 7) as of 2026-08-04 ~09:55; quick checks had ~13 min remaining. It should now
-   read available-to-testers on MolApp's Publishing overview. **Nobody has looked since.** Account slot
+1. **Confirm the production review cleared and the app is live.** On 2026-08-10 Alpha's `14 (1.1.4)` was
+   promoted to Production (track id `4698130211706379643`, all 176 countries + rest of world) and the
+   3 changes passed quick checks — Publishing overview read "Your changes are now in review" as of
+   2026-08-10. Google says "typically within 7 days"; the result goes to lee.donghan@gmail.com. Managed
+   publishing is **off**, so approval publishes worldwide automatically — nothing to click afterwards.
+   Check the store page `https://play.google.com/store/apps/details?id=com.donghan.molapp`. Account slot
    **u/0** is the right one — u/1 is kbsi.bionmr and hits a ToS gate. Credentials live in the
    `molapp-play-store-status` memory, not in the repo.
 2. **The visual-QA backlog**, still none of it started, ordered by user harm. Acceptance for any of it:
@@ -103,15 +105,22 @@ All of this is merged; the tree state note applies to the working tree, which is
   first user's machine. **[still applied — in `.github/workflows/`]**
 - **Native macOS file dialog: type the path one character at a time** (see below). Only method that worked
   for the Play upload. **[nothing left applied]**
+- **Promoting a test release to Production needs no re-upload** — on the Alpha track page (2026-08-10),
+  release row ▸ "Promote release" ▸ Production carried the bundle, release name and notes over verbatim.
+  The only blocker was the production track having **0 countries** ("No countries or regions have been
+  selected for this track"); the error's own "Add countries / regions" link ▸ header select-all checkbox ▸
+  Save fixed it, then Save the release, then Publishing overview ▸ "Submit 3 changes for review" (the
+  release + 2 country entries). **[still applied — it's Play Console state, not repo state]**
 
 ## What didn't work (don't repeat)
 
-- **The Chrome the session attaches to may be the wrong browser.** Two are connected: `Browser 1`
+- **The Chrome the session attaches to may be the wrong browser.** Two have been seen connected: `Browser 1`
   (`ce25cb43-39d7-4290-b791-91f1c2c27fb7`, macOS, local) and `Browser 2`
   (`c060c9ce-1ce0-4e06-a928-c53a2284e94c`, Linux, remote). A session defaulted to the **Linux** one, so
   clicking Upload opened a file dialog no local AppleScript could see, and the Play Console tab never
-  appeared in the local Chrome's tab list. `list_connected_browsers` → ask the user → `select_browser` with
-  the macOS deviceId. **Check this first.**
+  appeared in the local Chrome's tab list. `list_connected_browsers` → `select_browser` with the macOS
+  deviceId. **Check this first.** (On 2026-08-10, after `open -a "Google Chrome" <url>`, only the local
+  macOS browser was listed — the local one appears only while Chrome is actually running.)
 - **`mcp__claude-in-chrome__file_upload` cannot carry an AAB** — 10 MB payload cap, bundle is 55.1 MB. The
   native dialog is the only route.
 - **Fast synthetic typing into the macOS open panel silently drops characters.** `keystroke "/Users/dongha…"`
@@ -142,8 +151,9 @@ All of this is merged; the tree state note applies to the working tree, which is
 
 ## Open questions / risks
 
-- **The Play review outcome is unverified** — submission succeeded, approval was never confirmed. This is the
-  one genuinely open item.
+- **The production review outcome is pending** — submitted 2026-08-10, confirmed "in review" the same day,
+  approval not yet granted. This is the one genuinely open item. (The old open item — Alpha 14 (1.1.4)'s
+  review — is resolved: verified "Available to selected testers", released 2026-08-04 10:22 AM.)
 - **iOS has not been re-tested since the Android touch fix.** The change is a no-op there by construction
   (`disableVerticalScroll: !isAndroid` keeps the old values) and a widget test pins it, but no iOS device run
   was done.
