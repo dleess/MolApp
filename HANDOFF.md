@@ -1,134 +1,105 @@
-# HANDOFF: Android touch rotation fixed and shipped as 1.1.4 (build 14) — in Play review
+# HANDOFF: Android tablet keyboard-crash fixed (1.1.5+15) — submitted to Play production review
 
-**Written:** 2026-08-04 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `master` (clean; PR #36 merged as `851555e`)
+**Written:** 2026-08-10 · **Working dir:** `/Users/donghanlee/work/projects/molapp` · **Branch:** `handoff-refresh` (at `c7dd867`; user chose commit-only, no PR)
 
-> Replaces the 2026-07-27 HANDOFF (`git show fa1cf8e:HANDOFF.md`). That file's **"Next steps" backlog is still
-> open and unstarted** — accessibility of the objects panel, Help undiscoverable on iPhone portrait, the
-> landscape left-rail scroll, Mol\* chrome leaking, measure-banner contrast. Read it if you pick any of those up.
+> This replaces the earlier 2026-08-10 handoff (`7188150`). That file's Play-upload dead-ends and the
+> visual-QA backlog are carried over below — they are still valid.
 
 ## Goal
 
-Report: "Android에서 터치로 molecule이 회전이 안 된다." Done = rotation works, verified on the emulator,
-uploaded to Google Play, and submitted for review.
-
-**All of that is done.** Nothing is in flight.
+Ship the Android tablet keyboard-crash fix to Play production. "Done" = production release 15 (1.1.5)
+submitted for review in the Play Console (managed publishing is off, so it goes live on approval).
 
 ## Status
 
-- Fix merged to `master` (`851555e`, PR #36). Working tree clean, no debugging leftovers.
-- `cd flutter_app && flutter analyze` → `No issues found!`; `flutter test` → **122 passing** (was 120; 2 new).
-- All five CI jobs passed on #36 (run `30865531304`).
-- Play Console: **Closed testing "Alpha", release 7 = `14 (1.1.4)`, "Changes in review"** as of 2026-08-04
-  ~09:55. Quick checks were running with ~13 min remaining; changes are sent to review automatically once
-  they pass. Not verified past that point.
+- **Root cause found and fixed, fix verified on emulator, committed as `c7dd867`** (`fix(android): survive
+  WebView renderer death instead of crashing`, bumps `flutter_app/pubspec.yaml` to `1.1.5+15`).
+- Play production upload: **DONE 2026-08-10** — `molapp-1.1.5-15.aab` uploaded to the Production track,
+  release notes `<en-US>Fixed a crash on tablets when the on-screen keyboard opens</en-US>`, saved, and
+  "Submit 1 change for review" confirmed. Publishing overview shows **"Changes in review"** for
+  `15 (1.1.5) — Start full rollout`; quick checks were still running (auto-send on completion, managed
+  publishing off, so it goes live on approval). 1.1.4 went from submission to live the same day.
+- Working tree at write time: clean except this file.
 
-## The bug and its root cause
+## The bug and its root cause (verified 2026-08-10)
 
-`flutter_inappwebview`'s Android `OnTouchListener` returns `true` for **every** `ACTION_MOVE` when
-`disableHorizontalScroll` **and** `disableVerticalScroll` are both set:
+User reports: MolApp on Android **tablets** crashes the moment the on-screen keyboard opens (any input
+field). Reproduction on stock emulators **fails** — debug and release builds, Pixel Tablet AVDs API 36 and
+API 34 (2 GB RAM), landscape and portrait: keyboard opens fine. Play Console ▸ Android vitals shows **zero
+crash reports over 60 days, all filters off** — this crash type leaves no Java stacktrace and vitals needs
+user opt-in.
 
-```java
-// ~/.pub-cache/hosted/pub.dev/flutter_inappwebview_android-1.2.0-beta.3/android/src/main/java/
-//   com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebView.java:556-557
-if (customSettings.disableHorizontalScroll && customSettings.disableVerticalScroll) {
-  return (event.getAction() == MotionEvent.ACTION_MOVE);
-}
-```
+Mechanism, proven live on the `tablet34` AVD:
 
-Consuming the event means the WebView never delivers `touchmove` to the page, so the Mol\* camera has nothing
-to act on. Taps still worked (that is why a click could still focus a residue) — only drags died. iOS uses a
-different scrollView path and was never affected.
+1. The viewer is a fullscreen WebGL WebView (`flutter_inappwebview` 6.2.0-beta.3); the manifest uses
+   `android:windowSoftInputMode="adjustResize"`, so the keyboard resizes the whole canvas. On low-spec
+   tablets that resize can OOM the Chromium renderer (on emulators it never does — hence no repro).
+2. When the renderer dies, Android's default is to **kill the whole app** unless `onRenderProcessGone` is
+   handled. The app only implemented `onWebContentProcessDidTerminate` — the iOS/macOS callback. Plugin
+   source confirms: without a registered handler, `useOnRenderProcessGone` stays false and
+   `InAppWebViewClientCompat.onRenderProcessGone` falls through to `super` (= kill).
+3. Verified with `adb root` + `kill -9 <sandboxed_process0 pid>`: app died instantly, logcat said
+   `aw_browser_terminator.cc: Render process kill (OOM or update) wasn't handed by all associated
+   webviews, killing application.` Nothing lands in the crash buffer — matching the empty vitals.
 
-**Fix** (`flutter_app/lib/src/molstar_web_view.dart`): the settings moved into a new
-`viewerWebViewSettings()` (`@visibleForTesting`) that drops both flags on Android only —
-`disableVerticalScroll: !isAndroid`. `viewer.html` already pins scrolling itself (`overflow: hidden`,
-`touch-action: none`, `user-scalable=no`), so nothing scrolls that shouldn't. **[still applied]**
+Full write-up with reproduction details is in the `molapp-android-keyboard-crash` memory.
 
-## Evidence (API 36 emulator `test36`, 1CRN loaded, drag `adb shell input swipe 700 1500 300 1200 900`)
+## The fix (`flutter_app/lib/src/molstar_web_view.dart`, still applied, committed)
 
-| build | `touchmove` reaching the canvas | viewport pixels changed |
-| --- | --- | --- |
-| fixed | 108 | 19.8% (and 18.79% on a second run after reinstall) |
-| flags restored (deliberately reverted, then rebuilt) | **0** | **0.00%** |
+`_MolStarWebViewState` gained an `int _rebuildEpoch`; the `InAppWebView` gets `key:
+ValueKey<int>(_rebuildEpoch)` and a new `onRenderProcessGone` callback that does
+`setState(() => _rebuildEpoch++)` — tearing down the dead platform view and building a fresh WebView.
 
-Scale is identical before/after and the axis gizmo rotates with the scene, so it is rotation, not zoom.
-The user independently confirmed rotation on the emulator ("확인 했슴. 방향 바뀜").
+**Why not reload in place:** the first fix attempt mirrored the iOS handler (`bridge.attach` +
+`controller.loadFile`). The app survived, but the recovered page's JS→Dart bridge was half-dead —
+logcat filled with `Uncaught TypeError: _javaInjectedObject._callHandler is not a function` and a PDB
+load never completed. The key-bump rebuild produces **zero** such errors. Don't regress to loadFile.
 
-## What worked
-
-- **Instrumenting the JS bridge to find the failing layer.** A temporary listener in
-  `_bridgeUserScriptSource` logging `console.log('MOLDBG ' + t)` for touch/pointer events, read back with
-  `adb logcat -d | grep MOLDBG`, proved the moves reach `target=CANVAS` after the fix and never arrive
-  before it. **[reverted — the instrumentation is gone from the merged code]**
-- **Reverting the fix and rebuilding to prove causality** (0 moves, 0 pixels). This is what produced the
-  table above. **[reverted — the fix is back in place and merged]**
-- **Pixel-diffing two `adb exec-out screencap -p` captures** over the viewport crop `(0,950)-(1080,1750)`
-  with a per-channel-sum threshold of 12. Binary, no eyeballing.
-- **Native macOS file dialog: type the path one character at a time.** See below — this is the only method
-  that worked.
-
-## What didn't work
-
-- **The Chrome the session was attached to was the wrong browser.** Two browsers are connected: `Browser 1`
-  (`ce25cb43-39d7-4290-b791-91f1c2c27fb7`, macOS, local) and `Browser 2`
-  (`c060c9ce-1ce0-4e06-a928-c53a2284e94c`, Linux, remote). The session defaulted to the **Linux** one, so
-  clicking Upload opened a file dialog that no local AppleScript could see and the Play Console tab never
-  appeared in the local Chrome's tab list. `list_connected_browsers` → ask the user → `select_browser` with
-  the macOS deviceId. **Check this first next time.**
-- **`mcp__claude-in-chrome__file_upload` cannot be used for an AAB** — it caps the combined payload at 10 MB
-  and the bundle is 55.1 MB. The native dialog is the only route.
-- **Fast synthetic typing into the macOS open panel silently drops characters.** `keystroke "/Users/dongha…"`
-  in one call produced `/e/Downloads/molapp-1.1.4-14.aab`. Type character-by-character with a `delay 0.08`
-  between them and it lands perfectly.
-- **`keystroke "a" using {command down}` then Delete does not clear that panel's field.** Press
-  `key code 51` ~90 times instead.
-- **`entire contents of sheet 1` exposes no settable text field for the Go-to-folder panel**, and
-  `set value of` on it errors with *"Can't make item 1 … into type specifier"*. There are no AX `buttons`
-  either. AX inspection is useful for *finding* things, not for driving this dialog.
-- **Two Returns after typing the path overshoots** — it lands on `Macintosh HD`. Exactly **one** Return
-  selects the file (Open lights up), then one more Return presses Open.
-- **`System Events` clicks and type-ahead do not reach the open panel's file list.** `click at {x,y}` on a
-  row, then typing the filename, selected nothing.
-- **A `Bash` tool timeout killed the emulator.** The foreground `adb shell ping` hit the 2-minute limit and
-  SIGTERM took the emulator with it. Launch it detached: `nohup … & disown`, not via `run_in_background`
-  alongside long foreground commands.
-- **Swiping near the right screen edge (x≈1000 of 1080) does nothing** — Android gesture navigation eats it
-  as a back gesture. Drag through the middle of the screen.
-- **The user's own emulator test failed at one point and it was my fault** — the last APK installed was the
-  deliberately-reverted build. After any revert-to-prove experiment, **reinstall the fixed build before
-  telling anyone to look.**
+Verification on `tablet34` (release APK, `adb root`):
+- `kill -9` of the renderer → app survives, viewer.html fully re-initializes (GL init lines in console).
+- `load 1crn` after recovery behaves identically to a fresh launch (accepted, status updates, field syncs).
+- Caveat: the actual PDB network fetch stalls at "Loading 1CRN" on this AVD **both before any kill and
+  after recovery** — an emulator network quirk (same family as the known `test34` DNS gotcha), not the fix.
+  Booting with `-dns-server 8.8.8.8,1.1.1.1` did not cure it this time; `ping` and DNS resolution from
+  `adb shell` work fine. Unverified: a full render-complete after recovery. The equality of baseline and
+  post-recovery behavior is the evidence.
 
 ## Key files & commands
 
-- `flutter_app/lib/src/molstar_web_view.dart` — `viewerWebViewSettings()` holds the platform split; its doc
-  comment records why. `_bridgeUserScriptSource` is where instrumentation goes if this needs debugging again.
-- `flutter_app/test/molstar_web_view_test.dart` — 2 tests pinning the flags per platform via
-  `debugDefaultTargetPlatformOverride`. Revert the fix and they fail.
-- `cd flutter_app && flutter analyze` → `No issues found!` · `flutter test` → 122 passing (run from
-  `flutter_app/`, not the repo root).
-- Emulator: SDK at `~/Library/Android/sdk` (**not on `PATH`**), AVD `test36` (API 36), package
-  `com.donghan.molapp`, launch with `adb shell am start -W -n com.donghan.molapp/.MainActivity`.
-  `adb shell monkey` silently fails.
-- Release build: `cd flutter_app && flutter build appbundle --release` → 55.1 MB at
-  `build/app/outputs/bundle/release/app-release.aab`. Version lives in `flutter_app/pubspec.yaml`
-  (`version: 1.1.4+14`).
-- Play Console credentials/account details are in the `molapp-play-store-status` memory, not in the repo.
-  Account slot **u/0** was correct today (u/1 is kbsi.bionmr and hits a ToS gate).
+- `flutter_app/lib/src/molstar_web_view.dart` — the fix lives here (`_rebuildEpoch`, `onRenderProcessGone`).
+- `flutter_app/pubspec.yaml` — `version: 1.1.5+15`.
+- Release AAB: `cd flutter_app && flutter build appbundle --release` →
+  `build/app/outputs/bundle/release/app-release.aab` (~55 MB).
+- Tablet AVDs created this session (kept): `tablet36` (Pixel Tablet, API 36), `tablet34` (Pixel Tablet,
+  API 34, `hw.ramSize=2048`). Boot: `~/Library/Android/sdk/emulator/emulator -avd tablet34 -dns-server
+  8.8.8.8,1.1.1.1 -no-snapshot-save` (background it; a foreground Bash timeout once killed an emulator).
+- Renderer-kill test: `adb root`, `adb shell "ps -A | grep sandboxed_process"`, `kill -9 <pid>`, then
+  `ps -A | grep molapp` must still show the app and the viewer must show "Ready for structure loading".
+- `adb shell input text` drops literal spaces — write `load%s1crn`.
+- Play release notes text (user-approved): **"Fixed a crash on tablets when the on-screen keyboard opens"**.
 
 ## Next steps
 
-1. **Confirm the review cleared.** Publishing overview for MolApp; it should move from "Changes in review"
-   to available-to-testers. Quick checks were ~13 min out at 09:55 on 2026-08-04.
-2. If a rebuild is ever needed, note the AAB was staged at `~/Desktop/molapp-1.1.4-14.aab` **and**
-   `~/Downloads/molapp-1.1.4-14.aab` (the Downloads copy exists only because the file dialog was already
-   there). Both are outside git; delete freely.
-3. The 2026-07-27 backlog is untouched — see the quote at the top of this file.
+1. **Upload to Play production** (unless Status above says it happened): build the AAB, then in Play
+   Console (**u/0**, lee.donghan account — check the avatar; u/1 is kbsi.bionmr with a ToS gate) go to
+   Production ▸ Create new release ▸ upload via the **native** file dialog (the `file_upload` MCP tool has
+   a 10 MB cap), release notes as above, Save ▸ Publishing overview ▸ Submit for review. All upload
+   dead-ends from the previous handoff still apply (char-by-char typing with delay 0.08, one Return to
+   select + one to open, ~90 × `key code 51` to clear the field, `.aab` may need Cmd+Shift+G go-to-folder).
+2. After submission: update the `molapp-play-store-status` memory and the Status line of this file.
+3. The **visual-QA backlog** from the previous handoff remains untouched (objects-panel accessibility,
+   iPhone-portrait Help discoverability, landscape left-rail scroll, Mol* chrome flags, measure-banner
+   contrast — see git history of this file at `7188150` for the full descriptions).
 
 ## Open questions / risks
 
-- **The review outcome is unverified.** Submission succeeded; approval had not happened when this was written.
-- **iOS was not re-tested.** The change is a no-op there by construction (`!isAndroid` keeps the old values)
-  and the widget test pins it, but no iOS device run was done today.
-- **A second Claude Code session was running on this Mac** during the upload and repeatedly stole focus,
-  which is part of why the keystroke work was so flaky. If GUI scripting misbehaves, check for that first.
-- The emulator currently has the **fixed** debug APK installed (verified by the 18.79% rotation run).
+- **The trigger inference is indirect**: renderer death on keyboard resize was never reproduced on an
+  emulator (they're too well-resourced). What's proven is that any renderer death killed the app pre-fix
+  and doesn't post-fix. If tablet reports continue on 1.1.5, the next suspect is a crash in the Flutter
+  side itself — get a real device or a Firebase Test Lab run on a low-RAM tablet.
+- Post-recovery full render (structure actually drawn) is unverified — blocked by the AVD network stall
+  above, not by the fix.
+- `flutter test` was not re-run this session (only `flutter analyze` on the changed file, clean); CI will
+  run the suite when the branch is pushed. The branch has **not been pushed** as of writing.
+- iOS/macOS behavior is untouched by construction (`onWebContentProcessDidTerminate` unchanged, key bump
+  is platform-neutral and only fires from the Android-only callback).

@@ -91,6 +91,11 @@ class MolStarWebView extends StatefulWidget {
 }
 
 class _MolStarWebViewState extends State<MolStarWebView> {
+  /// Bumped when the Android renderer dies. Reloading the page in the same WebView leaves the
+  /// plugin's JS bridge broken (`_javaInjectedObject._callHandler is not a function`), so the key
+  /// change tears the dead platform view down and builds a fresh one, bridge included.
+  int _rebuildEpoch = 0;
+
   @override
   Widget build(BuildContext context) {
     return Listener(
@@ -106,6 +111,7 @@ class _MolStarWebViewState extends State<MolStarWebView> {
         widget.bridge.sendHover(event.localPosition.dx, event.localPosition.dy);
       },
       child: InAppWebView(
+        key: ValueKey<int>(_rebuildEpoch),
         initialFile: kViewerAssetPath,
         initialSettings: viewerWebViewSettings(),
         initialUserScripts: UnmodifiableListView<UserScript>(<UserScript>[
@@ -143,6 +149,12 @@ class _MolStarWebViewState extends State<MolStarWebView> {
           // rather than reload(): after a crash every command sent meanwhile would hit a dead page.
           widget.bridge.attach(_InAppWebViewJsRunner(controller));
           controller.loadFile(assetFilePath: kViewerAssetPath);
+        },
+        onRenderProcessGone: (controller, detail) {
+          // Android's counterpart of the callback above. Registering it flips the plugin's
+          // useOnRenderProcessGone setting; without it a dead renderer (OOM on keyboard resize
+          // of the WebGL canvas, or a WebView update) makes Android kill the whole app.
+          setState(() => _rebuildEpoch++);
         },
       ),
     );
