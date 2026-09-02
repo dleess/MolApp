@@ -2,32 +2,30 @@
 
 Mol\*-powered molecule viewer.
 
-There are four shells in this repo over one shared web core:
+There are three shells in this repo over one shared web core:
 
 | Directory | Shell | Targets |
 | --- | --- | --- |
 | **`flutter_app/`** | **Flutter / Dart** | **iOS, Android, macOS, Windows** |
 | `linux/` | GTK 3 / WebKitGTK (Python) | Linux |
 | `MolApp/` | SwiftUI | iPadOS / iOS |
-| `android/` | Jetpack Compose | Android |
 
 **`flutter_app/` is the one to work in for the mobile and desktop targets it covers.** See
 [`flutter_app/README.md`](flutter_app/README.md) for setup, per-platform requirements and known
-gaps. The two native mobile shells are kept as the reference implementations the Flutter port was
-checked against; they still build.
+gaps. The SwiftUI shell is the reference implementation the Flutter port was checked against and
+still ships to the App Store. The former Jetpack Compose shell (`android/`) and the Flutter Linux
+target were removed; they live on at the git tags `native-android-ref` and `flutter-linux-ref`.
 
 **Linux is served by `linux/`, not by Flutter.** `flutter_inappwebview_linux` renders through WPE
-WebKit 2.40+, which no current Ubuntu ships at all, so the Flutter `linux` CI job has never passed
-— see the note on that job in `.github/workflows/flutter.yml`. The GTK shell runs the same
+WebKit 2.40+, which no current Ubuntu ships at all, so the Flutter Linux target was dropped. The GTK shell runs the same
 `viewer.html` on stock WebKitGTK 4.1 with no build step; see
 [`linux/README.md`](linux/README.md).
 
 ## The shared web core
 
 `MolApp/Resources/viewer.html` plus `MolApp/Resources/molstar/` are the actual viewer, and are the
-**single source of truth for all four shells**. Edit only that copy:
+**single source of truth for all three shells**. Edit only that copy:
 
-- Android copies it at build time (`copyWebAssets` in `android/app/build.gradle`).
 - Flutter copies it with `dart run tool/sync_web_assets.dart`.
 - iOS bundles it directly as a target resource.
 - Linux loads it straight from this directory (`$MOLAPP_WEB_ROOT` overrides).
@@ -50,8 +48,6 @@ linux/packaging/build-deb.sh && sudo apt-get install -y ./linux/dist/molapp_*.de
 # SwiftUI (iPad)
 xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.4.1' build CODE_SIGNING_ALLOWED=NO
 
-# Compose (Android)
-cd android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew assembleDebug
 ```
 
 ## Apple Pencil

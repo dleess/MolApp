@@ -15,8 +15,8 @@ dependencies:
 
   cupertino_icons: ^1.0.8
 
-  # The Mol* viewport. This is the one plugin that covers all five targets:
-  # Android/iOS (WebKit+Chromium), macOS (WKWebView), Windows (WebView2), Linux (WPE WebKit).
+  # The Mol* viewport. This is the one plugin that covers all four targets:
+  # Android/iOS (WebKit+Chromium), macOS (WKWebView), Windows (WebView2).
   flutter_inappwebview: ^6.2.0-beta.3
 
   # File open (structure + .molapp state) and desktop save dialogs.
@@ -42,8 +42,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # Synced from ../MolApp/Resources by `dart run tool/sync_web_assets.dart`, the same
-  # single-source-of-truth rule the Android app's copyWebAssets task follows. Gitignored.
+  # Synced from ../MolApp/Resources by `dart run tool/sync_web_assets.dart`. Gitignored.
   assets:
     - assets/web/
     - assets/web/molstar/

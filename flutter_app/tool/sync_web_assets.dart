@@ -1,6 +1,5 @@
 // Copies the shared web core (viewer.html + the Mol* bundle) from ../MolApp/Resources into
-// assets/web/, so the 4.8 MB molstar bundle lives in git exactly once. Same single-source-of-truth
-// rule as the Android app's `copyWebAssets` Gradle task — edit only ../MolApp/Resources.
+// assets/web/, so the 4.8 MB molstar bundle lives in git exactly once. Edit only ../MolApp/Resources.
 //
 //   dart run tool/sync_web_assets.dart
 //
