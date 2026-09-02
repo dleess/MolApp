@@ -1,27 +1,25 @@
 # MolApp (Linux)
 
-The GTK 3 / WebKitGTK shell — the fourth shell over the shared web core, alongside SwiftUI
-(`../MolApp`), Jetpack Compose (`../android`) and Flutter (`../flutter_app`).
+The GTK 3 / WebKitGTK shell — the third shell over the shared web core, alongside SwiftUI
+(`../MolApp`) and Flutter (`../flutter_app`).
 
-It runs the same `../MolApp/Resources/viewer.html` the other three do, unmodified: WebKitGTK is the
+It runs the same `../MolApp/Resources/viewer.html` the other two do, unmodified: WebKitGTK is the
 Linux member of the same WebKit family iOS/macOS use, so `postToNative` in viewer.html already
 falls through to `window.webkit.messageHandlers.molapp.postMessage` — exactly the channel this
 shell registers. No Linux branch was added to the shared core.
 
-## Why not Flutter, when `flutter_app` claims Linux
+## Why not Flutter
 
 `flutter_inappwebview_linux` (its only published version, 0.1.0-beta.1) renders through **WPE
-WebKit 2.40+**, and no Ubuntu release ships WPE at all any more — jammy was the last, at 2.36. That
-is why `.github/workflows/flutter.yml`'s `linux` job has never once passed and carries a
-`continue-on-error` on its build step. The alternative Flutter-side webviews are worse fits here:
+WebKit 2.40+**, and no Ubuntu release ships WPE at all any more — jammy was the last, at 2.36. The
+Flutter Linux target never built in CI and was dropped (git tag `flutter-linux-ref`). The alternative Flutter-side webviews are worse fits here:
 Flutter's Linux embedder has no platform views, so a GTK-based plugin has to float a native
 `WebKitWebView` in a `GtkOverlay` **above** the Flutter surface — and this app draws its entire
 chrome (menu bar, info card, Objects panel, command bar) *over* a full-bleed viewport, so every
 menu and panel would end up behind the web view.
 
 A GTK shell has neither problem: the web view is a widget in the layout, GTK menus and popovers are
-their own windows, and WebKitGTK 4.1 is a stock Ubuntu package with GPU-accelerated WebGL. The
-Flutter Linux job stays in CI as the canary it already was.
+their own windows, and WebKitGTK 4.1 is a stock Ubuntu package with GPU-accelerated WebGL.
 
 ## Requirements
 

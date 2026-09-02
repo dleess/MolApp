@@ -1,6 +1,6 @@
-# The GTK/WebKitGTK Linux shell. Unlike the Flutter `linux` job — which cannot pass anywhere,
-# because its plugin needs WPE WebKit 2.40+ and no Ubuntu ships WPE at all any more — this one runs
-# the real viewer on stock ubuntu-latest packages, headless under Xvfb.
+# The GTK/WebKitGTK Linux shell: runs the real viewer on stock ubuntu-latest packages, headless
+# under Xvfb. (The Flutter Linux target was dropped — its plugin needs WPE WebKit 2.40+, which no
+# Ubuntu ships.)
 #
 # No step consumes attacker-controllable event data; there is no interpolation at all.
 name: linux

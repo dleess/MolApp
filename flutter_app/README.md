@@ -1,8 +1,8 @@
 # MolApp (Flutter)
 
-The Mol\*-powered molecule viewer for **iOS, Android, macOS, Windows and Linux** from one codebase.
-This replaces the SwiftUI app in `../MolApp` and the Compose app in `../android`, which stay in the
-repo as the reference implementations the port was checked against.
+The Mol\*-powered molecule viewer for **iOS, Android, macOS and Windows** from one codebase.
+This replaces the SwiftUI app in `../MolApp`, which stays in the repo as the reference
+implementation the port was checked against. Linux ships as the GTK shell in `../linux/`.
 
 ## What is shared and what was rewritten
 
@@ -25,8 +25,8 @@ The one change to the shared web core is a third branch in `postToNative` (`view
 `window.molappPostMessage` hook the Flutter host installs. The iOS `webkit.messageHandlers` and
 Android `MolAppAndroid` branches are untouched, so the native apps still build and run.
 
-All five platforms use a single webview plugin, `flutter_inappwebview`: WKWebView on iOS/macOS,
-Android System WebView, WebView2 on Windows, WPE WebKit on Linux.
+All four platforms use a single webview plugin, `flutter_inappwebview`: WKWebView on iOS/macOS,
+Android System WebView, WebView2 on Windows.
 
 ## Setup
 
@@ -36,8 +36,7 @@ flutter pub get
 dart run tool/sync_web_assets.dart   # copies viewer.html + molstar/ from ../MolApp/Resources
 ```
 
-`assets/web/` is gitignored so the 4.8 MB Mol\* bundle lives in git exactly once — the same rule the
-Android app's `copyWebAssets` Gradle task follows. **Edit only `../MolApp/Resources`**, then re-sync.
+`assets/web/` is gitignored so the 4.8 MB Mol\* bundle lives in git exactly once. **Edit only `../MolApp/Resources`**, then re-sync.
 Forgetting the sync fails the build loudly (Flutter cannot find the asset directory); it never ships
 a silently broken viewer.
 
@@ -52,16 +51,6 @@ flutter config --no-enable-swift-package-manager
 target against a current SDK. CocoaPods builds it at the app's own 10.15 target instead, which is
 fine. This is a per-machine Flutter setting, not something the repo can carry — CI sets it too.
 
-### Linux: WPE WebKit
-
-```sh
-sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
-  libwpewebkit-1.1-dev libwpebackend-fdo-1.0-dev libwpe-1.0-dev libepoxy-dev
-```
-
-The plugin prefers `wpe-platform-2.0` (WPE WebKit 2.40+) and falls back to `wpe-webkit-1.1` +
-`wpebackend-fdo-1.0`, which is what Ubuntu ships.
-
 ### Windows: NuGet on PATH
 
 `flutter_inappwebview_windows` pulls the WebView2 SDK from NuGet at configure time, so `nuget.exe`
@@ -70,9 +59,9 @@ must be on `PATH`.
 ## Build and run
 
 ```sh
-flutter run -d macos          # or: -d windows, -d linux, -d <android device>, -d <ios device>
+flutter run -d macos          # or: -d windows, -d <android device>, -d <ios device>
 flutter build macos --release
-flutter build apk --release   # and: appbundle, ios, windows, linux
+flutter build apk --release   # and: appbundle, ios, windows
 ```
 
 ## Distribution builds
@@ -115,7 +104,6 @@ target is wired end to end.
 | Android `applicationId` | `com.donghan.molapp` | same as the Compose app, so the Play listing carries over |
 | iOS bundle id | `com.donghan.MolApp` | matches the App Store app (case-sensitive) |
 | macOS bundle id | `com.donghan.molapp` | new target, no existing listing |
-| Linux application id | `com.donghan.molapp` | |
 | version | `1.0.4+1` (pubspec) | Android was at versionName 1.0.4 / versionCode 3, iOS at 1.0.3 / build 9 |
 
 Android release signing reads `MOLAPP_STORE_FILE` / `MOLAPP_STORE_PASSWORD` / `MOLAPP_KEY_ALIAS` /
@@ -135,8 +123,8 @@ used. Without them the release build falls back to debug keys so `flutter run --
 - **Windows is built and launched by CI, not by hand.** No local hardware. The `windows` job now
   unpacks the distribution archive and starts `molapp.exe` from it, so the app is known to come up
   and stay up — but nothing drives it: the viewport, gestures and the file dialogs are still unproven
-  there. (The Flutter *Linux* target cannot build anywhere — see the note on that job. Linux ships as
-  the GTK shell in `../linux/`, which its own workflow runs headless under Xvfb.)
+  there. (Linux ships as the GTK shell in `../linux/`, which its own workflow runs headless under
+  Xvfb; the Flutter Linux target was dropped — tag `flutter-linux-ref`.)
 - **Foldables.** Flutter's default `configChanges` is a superset of the attribute PR #17 added for
   the Samsung Flip, and the webview lives inside the Flutter view rather than being rebuilt in
   `onCreate`, so that class of bug should be gone — but this was not re-tested on real Flip hardware.

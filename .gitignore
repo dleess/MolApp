@@ -16,3 +16,4 @@ __pycache__/
 *.pyc
 linux/dist/
 flutter_app/dist/
+.archive/
