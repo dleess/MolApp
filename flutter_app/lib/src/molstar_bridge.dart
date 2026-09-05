@@ -297,26 +297,19 @@ class MolStarBridge extends ChangeNotifier {
   // Request/response (not fire-and-forget): the caller needs the returned value, so these bypass
   // the serial script queue and await the JS result directly.
 
-  Future<String?> serializeState() async {
-    final runner = _runner;
-    if (runner == null) return null;
-    try {
-      final result = await runner.callAsync(
+  Future<String?> serializeState() => _callAsyncString(
         'return (window.molapp && window.molapp.serializeMolAppState)'
         ' ? await window.molapp.serializeMolAppState() : null;',
       );
-      return result as String?;
-    } catch (error) {
-      reportError(error.toString());
-      return null;
-    }
-  }
 
-  Future<String?> captureImageDataURL() async {
+  Future<String?> captureImageDataURL() =>
+      _callAsyncString('return await window.molapp.captureImageDataURL();');
+
+  Future<String?> _callAsyncString(String source) async {
     final runner = _runner;
     if (runner == null) return null;
     try {
-      final result = await runner.callAsync('return await window.molapp.captureImageDataURL();');
+      final result = await runner.callAsync(source);
       return result as String?;
     } catch (error) {
       reportError(error.toString());
