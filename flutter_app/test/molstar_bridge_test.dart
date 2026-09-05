@@ -332,6 +332,22 @@ void main() {
   });
 
   group('async calls', () {
+    test('state and image reads preserve strings and null and report invalid results', () async {
+      final runner = FakeJsRunner();
+      final bridge = readyBridge(runner);
+      for (final read in [bridge.serializeState, bridge.captureImageDataURL]) {
+        for (final result in <String?>['captured value', null]) {
+          runner.asyncResult = result;
+          expect(await read(), result);
+          expect(bridge.lastErrorMessage, isNull);
+        }
+        runner.asyncResult = 42;
+        expect(await read(), isNull);
+        expect(bridge.lastErrorMessage, isNotNull);
+        bridge.clearError();
+      }
+    });
+
     test('serializeState returns null without a runner', () async {
       expect(await MolStarBridge().serializeState(), isNull);
     });
