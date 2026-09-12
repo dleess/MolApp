@@ -14,8 +14,8 @@ native host around that one HTML file, and it is the single source of truth — 
 
 | Shell | Dir | Ships as | Web core reaches it by |
 | --- | --- | --- | --- |
-| Flutter / Dart | `flutter_app/` | Play (Android), macOS `.dmg`, Windows `.zip`; iOS builds but the App Store build is the SwiftUI shell | `dart run tool/sync_web_assets.dart` → `assets/web/` (gitignored) |
-| SwiftUI | `MolApp/`, `MolApp.xcodeproj` | App Store (iPadOS/iOS), via the `ship` skill | Xcode target resource, `loadFileURL` |
+| Flutter / Dart | `flutter_app/` | App Store (iOS, via the `ship` skill), Play (Android), macOS `.dmg`, Windows `.zip` | `dart run tool/sync_web_assets.dart` → `assets/web/` (gitignored) |
+| SwiftUI | `MolApp/`, `MolApp.xcodeproj` | iPadOS/iOS reference shell and regression tests | Xcode target resource, `loadFileURL` |
 | GTK 3 / WebKitGTK (Python) | `linux/` | `.deb` from `linux/packaging/build-deb.sh` | reads `../MolApp/Resources` directly (`$MOLAPP_WEB_ROOT` overrides) |
 
 Flutter does **not** serve Linux (`flutter_inappwebview_linux` needs WPE WebKit no Ubuntu ships).
