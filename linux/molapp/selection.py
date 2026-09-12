@@ -99,17 +99,20 @@ class SelectionExpressionParser:
             return SelectionAST(kind=SelectionASTKind.atom, value=self._value_for(token).upper())
         if token in ("res", "residue"):
             value = self._value_for(token)
-            # A range needs an interior hyphen ("3-42"); a leading-only hyphen is a negative single
-            # residue ("-5"), not a range.
-            if len(value) > 1 and "-" in value[1:]:
+            if re.fullmatch(r"-?[0-9]+--?[0-9]+", value):
                 return SelectionAST(kind=SelectionASTKind.residueRange, value=value)
+            if not re.fullmatch(r"[+-]?[0-9]+", value):
+                raise SelectionParseError(f"Invalid value for {token}: {value}")
             return SelectionAST(kind=SelectionASTKind.residue, value=value)
         if token == "resn":
             return SelectionAST(
                 kind=SelectionASTKind.residueName, value=self._value_for(token).upper()
             )
         if token == "model":
-            return SelectionAST(kind=SelectionASTKind.model, value=self._value_for(token))
+            value = self._value_for(token)
+            if not re.fullmatch(r"[+-]?[0-9]+", value):
+                raise SelectionParseError(f"Invalid value for {token}: {value}")
+            return SelectionAST(kind=SelectionASTKind.model, value=value)
 
         raise SelectionParseError(f"Unexpected token: {token}")
 
@@ -118,6 +121,8 @@ class SelectionExpressionParser:
         if self._index >= len(self._tokens):
             raise SelectionParseError(f"Missing value for {keyword}")
         value = self._tokens[self._index]
+        if value in SYMBOLS:
+            raise SelectionParseError(f"Missing value for {keyword}")
         self._index += 1
         return value
 

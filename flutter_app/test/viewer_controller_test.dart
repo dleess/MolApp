@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:molapp/src/models.dart';
 import 'package:molapp/src/molstar_bridge.dart';
@@ -88,10 +90,40 @@ void main() {
       expect(h.controller.visibilityStates[MoleculeVisibilityFeature.water], isFalse);
     });
 
+    test('visibility stays optimistic across unrelated bridge events', () {
+      final h = _Harness();
+      h.bridge.reportError('Previous command failed');
+      h.controller.toggleVisibility(MoleculeVisibilityFeature.water);
+      expect(h.lastPayload['isVisible'], isFalse);
+      expect(h.controller.visibilityStates[MoleculeVisibilityFeature.water], isFalse);
+
+      h.bridge.updateHoverPoint(null);
+      expect(h.controller.visibilityStates[MoleculeVisibilityFeature.water], isFalse);
+      h.bridge.receiveMessage(<String, dynamic>{
+        'event': 'featureVisibility', 'feature': 'water', 'isVisible': false,
+      });
+      h.controller.toggleVisibility(MoleculeVisibilityFeature.water);
+      h.bridge.updateHoverPoint(null);
+      expect(h.lastPayload['isVisible'], isTrue);
+      expect(h.controller.visibilityStates[MoleculeVisibilityFeature.water], isTrue);
+
+      h.bridge.receiveMessage(<String, dynamic>{
+        'id': 'toggle', 'command': 'toggleVisibility', 'success': false,
+        'error': 'Viewer unavailable',
+      });
+      expect(h.controller.visibilityStates[MoleculeVisibilityFeature.water], isFalse);
+    });
+
     test('hide of an unknown word is treated as an object name', () {
       final h = _Harness()..run('hide 1CRN');
       expect(h.lastCommand, 'setObjectVisibility');
       expect(h.lastPayload, <String, dynamic>{'name': '1CRN', 'isVisible': false});
+    });
+
+    test('feature words in a longer object name target the object', () {
+      final h = _Harness()..run('hide protein model.pdb');
+      expect(h.lastCommand, 'setObjectVisibility');
+      expect(h.lastPayload, <String, dynamic>{'name': 'protein model.pdb', 'isVisible': false});
     });
 
     test('show of an already-shown feature is a no-op', () {
@@ -278,6 +310,37 @@ void main() {
       expect(h.controller.statusMessage, 'Angle: CA — CB — CG');
     });
 
+    test('a new page clears modes that belonged to the previous scene', () {
+      final h = _Harness()..run('measure angle');
+      h.controller.setRepresentation(MoleculeRepresentation.surface);
+      h.bridge.receiveMessage(<String, dynamic>{
+        'id': 'morph', 'command': 'startMorph', 'success': true,
+      });
+
+      h.bridge.attach(FakeJsRunner());
+
+      expect(h.controller.measureKind, isNull);
+      expect(h.controller.isMorphing, isFalse);
+      expect(h.controller.selectedRepresentation, MoleculeRepresentation.ribbon);
+    });
+
+    test('a fatal startup clears the queued mode while ordinary startup events preserve it', () {
+      final runner = FakeJsRunner();
+      final bridge = MolStarBridge()..attach(runner);
+      final controller = ViewerController(bridge);
+      controller.toggleMeasure(MeasureKind.angle);
+
+      bridge.updateHoverPoint(null);
+      expect(controller.measureKind, MeasureKind.angle);
+      expect(runner.evaluated, isEmpty);
+
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'viewerError', 'fatal': true, 'message': 'Initialization failed',
+      });
+      expect(controller.measureKind, isNull);
+      expect(controller.statusMessage, kIdleStatus);
+    });
+
     test('feature visibility pushed by JS updates the menu labels', () {
       final h = _Harness();
       expect(h.controller.visibilityStates[MoleculeVisibilityFeature.water], isTrue);
@@ -286,6 +349,25 @@ void main() {
       );
       expect(h.controller.visibilityStates[MoleculeVisibilityFeature.water], isFalse);
     });
+  });
+
+  test('pending file actions stop when the page is disposed', () async {
+    for (final action in <Future<void> Function(ViewerController)>[
+      (controller) => controller.saveState(),
+      (controller) => controller.exportImage(ExportFormat.png),
+      (controller) => controller.printDisplay(),
+    ]) {
+      final runner = _PendingJsRunner();
+      final bridge = MolStarBridge()..attach(runner);
+      bridge.receiveMessage(<String, dynamic>{'event': 'viewerReady'});
+      bridge.addObject(const MolAppObject(name: '1CRN', type: MolAppObjectType.structure));
+      final controller = ViewerController(bridge);
+      final pending = action(controller);
+      controller.dispose();
+      bridge.dispose();
+      runner.result.complete('old page result');
+      await pending;
+    }
   });
 
   group('encoding', () {
@@ -308,8 +390,11 @@ void main() {
 
     setUp(() {
       TestWidgetsFlutterBinding.ensureInitialized();
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       FileSelectorPlatform.instance = _CancellingFileSelector();
     });
+
+    tearDown(() => debugDefaultTargetPlatformOverride = null);
 
     test('leaves saveState at idle rather than claiming it wrote a file', () async {
       final h = _Harness()..loadStructures(<String>['1CRN']);
@@ -340,4 +425,11 @@ class _CancellingFileSelector extends FileSelectorPlatform {
     List<XTypeGroup>? acceptedTypeGroups,
   }) async =>
       null;
+}
+
+class _PendingJsRunner extends FakeJsRunner {
+  final result = Completer<Object?>();
+
+  @override
+  Future<Object?> callAsync(String source) => result.future;
 }

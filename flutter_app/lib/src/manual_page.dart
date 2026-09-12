@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// App version shown at the foot of the manual. Kept in step with pubspec's `version:`.
-const String kAppVersion = '1.0.4';
-
 class _ManualCommand {
   const _ManualCommand(this.syntax, this.detail);
 
@@ -199,14 +196,6 @@ class ManualPage extends StatelessWidget {
             ],
             const SizedBox(height: 22),
           ],
-          Center(
-            child: Text(
-              'MolApp version $kAppVersion',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.5),
-              ),
-            ),
-          ),
         ],
       ),
     );

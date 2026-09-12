@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
@@ -79,12 +78,8 @@ abstract final class LocalStructureFileLoader {
     // Android and iOS filter by MIME type / UTI, and .pdb / .cif / .molapp have neither. Filtering
     // by extension there would grey out every file, so open the picker unfiltered and validate the
     // extension after the fact — the same thing the native Android app did with its `*/*` picker.
-    final filtersApply = !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.macOS ||
-            defaultTargetPlatform == TargetPlatform.windows ||
-            defaultTargetPlatform == TargetPlatform.linux);
     return openFile(
-      acceptedTypeGroups: filtersApply
+      acceptedTypeGroups: platformHasSaveDialog
           ? <XTypeGroup>[XTypeGroup(label: label, extensions: extensions)]
           : const <XTypeGroup>[],
     );
@@ -120,4 +115,6 @@ abstract final class LocalStructureFileLoader {
 /// system share sheet instead.
 bool get platformHasSaveDialog =>
     !kIsWeb &&
-    (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
+    (defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux);

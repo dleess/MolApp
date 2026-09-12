@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -10,9 +11,13 @@ class FakeJsRunner implements MolStarJsRunner {
   final List<String> evaluated = <String>[];
   Object? asyncResult;
   Object? asyncError;
+  Object? evaluateError;
 
   @override
-  Future<void> evaluate(String source) async => evaluated.add(source);
+  Future<void> evaluate(String source) async {
+    if (evaluateError != null) throw StateError(evaluateError.toString());
+    evaluated.add(source);
+  }
 
   @override
   Future<Object?> callAsync(String source) async {
@@ -102,6 +107,34 @@ void main() {
       );
       expect(bridge.isViewerReady, isFalse);
       expect(bridge.lastErrorMessage, 'Fatal');
+    });
+
+    test('a new page clears state from the previous scene', () {
+      final bridge = readyBridge(FakeJsRunner());
+      bridge.addObject(const MolAppObject(name: '1CRN', type: MolAppObjectType.structure));
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'selectionChanged',
+        'selection': <String, dynamic>{'type': 'atom', 'label': 'CA'},
+      });
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'featureVisibility', 'feature': 'water', 'isVisible': false,
+      });
+      bridge.updateHoverPoint(const Offset(2, 3));
+      bridge.receiveMessage(<String, dynamic>{'event': 'pencilHover', 'label': 'CA'});
+      bridge.receiveMessage(<String, dynamic>{
+        'event': 'measurePending', 'count': 1, 'target': 3, 'labels': <String>['CA'],
+      });
+
+      bridge.attach(FakeJsRunner());
+
+      expect(bridge.isViewerReady, isFalse);
+      expect(bridge.objects, isEmpty);
+      expect(bridge.currentSelection, isNull);
+      expect(bridge.featureVisibility, isEmpty);
+      expect(bridge.hoverPoint, isNull);
+      expect(bridge.hoverLabel, isNull);
+      expect(bridge.measurePendingCount, 0);
+      expect(bridge.measurePendingLabels, isEmpty);
     });
 
     test('holds commands until the viewer is ready, then flushes in order', () {
@@ -331,7 +364,68 @@ void main() {
     });
   });
 
+  test('gesture evaluation reports failures instead of leaking unhandled futures', () async {
+    final runner = FakeJsRunner()..evaluateError = 'page unavailable';
+    final bridge = readyBridge(runner);
+    for (final send in <Future<void> Function()>[
+      () => bridge.sendHover(1, 2),
+      bridge.sendHoverEnd,
+      () => bridge.sendPinch(1.1, 1, 2),
+    ]) {
+      bridge.clearError();
+      await send();
+      expect(bridge.lastErrorMessage, contains('page unavailable'));
+    }
+  });
+
   group('async calls', () {
+    test('state and image reads preserve strings and null and report invalid results', () async {
+      final runner = FakeJsRunner();
+      final bridge = readyBridge(runner);
+      for (final read in [bridge.serializeState, bridge.captureImageDataURL]) {
+        for (final result in <String?>['captured value', null]) {
+          runner.asyncResult = result;
+          expect(await read(), result);
+          expect(bridge.lastErrorMessage, isNull);
+        }
+        runner.asyncResult = 42;
+        expect(await read(), isNull);
+        expect(bridge.lastErrorMessage, isNotNull);
+        bridge.clearError();
+      }
+    });
+
+    test('ignores async results and errors from a detached or replaced page', () async {
+      for (final replace in <bool>[false, true]) {
+        for (final fail in <bool>[false, true]) {
+          final pending = Completer<Object?>();
+          final bridge = MolStarBridge()..attach(_DeferredJsRunner(pending));
+          final read = bridge.serializeState();
+          if (replace) {
+            bridge.attach(FakeJsRunner());
+          } else {
+            bridge.detach();
+          }
+          if (fail) {
+            pending.completeError(StateError('old page failed'));
+          } else {
+            pending.complete('old scene');
+          }
+          expect(await read, isNull);
+          expect(bridge.lastErrorMessage, isNull);
+        }
+      }
+    });
+
+    test('does not notify a disposed bridge when async work fails', () async {
+      final pending = Completer<Object?>();
+      final bridge = MolStarBridge()..attach(_DeferredJsRunner(pending));
+      final read = bridge.captureImageDataURL();
+      bridge.dispose();
+      pending.completeError(StateError('page closed'));
+      expect(await read, isNull);
+    });
+
     test('serializeState returns null without a runner', () async {
       expect(await MolStarBridge().serializeState(), isNull);
     });
@@ -343,4 +437,16 @@ void main() {
       expect(bridge.lastErrorMessage, contains('canvas is gone'));
     });
   });
+}
+
+class _DeferredJsRunner implements MolStarJsRunner {
+  _DeferredJsRunner(this.result);
+
+  final Completer<Object?> result;
+
+  @override
+  Future<void> evaluate(String source) async {}
+
+  @override
+  Future<Object?> callAsync(String source) => result.future;
 }

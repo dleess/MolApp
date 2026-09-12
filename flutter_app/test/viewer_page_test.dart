@@ -252,6 +252,42 @@ void main() {
     expect(find.text('GLY A 1 CA'), findsOneWidget);
   });
 
+  testWidgets('long measurement labels fit a narrow viewport', (tester) async {
+    final bridge = await pumpViewer(tester, size: const Size(320, 700));
+    await tester.enterText(find.byType(TextField).last, 'measure dihedral');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    bridge.receiveMessage(<String, dynamic>{
+      'event': 'measurePending',
+      'count': 3,
+      'target': 4,
+      'labels': <String>['ALA A 100 CA', 'GLY A 101 CA', 'LYS A 102 CA'],
+    });
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    final label = find.textContaining('ALA A 100 CA, GLY A 101 CA, LYS A 102 CA');
+    expect(tester.getRect(label).right, lessThanOrEqualTo(320));
+  });
+
+  testWidgets('choosing an object color closes its menu', (tester) async {
+    final bridge = await pumpViewer(tester);
+    bridge.receiveMessage(<String, dynamic>{
+      'event': 'objectsReplaced',
+      'objects': <dynamic>[
+        <String, dynamic>{'name': 'mini.pdb', 'type': 'structure'},
+      ],
+    });
+    await tester.pump();
+    await tester.tap(find.byType(MenuAnchor).last);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('red'), findsOneWidget);
+    await tester.tap(find.byTooltip('red'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('red'), findsNothing);
+    expect(find.text('mini.pdb'), findsOneWidget);
+  });
+
   testWidgets('the chrome clears the status-bar inset while the viewport stays full-bleed',
       (tester) async {
     // Without SafeArea the menu bar's `top: 8` put the whole row inside the iPhone's 59pt inset,

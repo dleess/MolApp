@@ -166,12 +166,14 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
               children: <Widget>[
                 const Icon(Icons.straighten, size: 14, color: ChromeTokens.textPrimary),
                 const SizedBox(width: 6),
-                Text(
-                  text,
-                  style: const TextStyle(
-                    color: ChromeTokens.textPrimary,
-                    fontSize: ChromeTokens.sizeBody,
-                    fontWeight: FontWeight.w600,
+                Flexible(
+                  child: Text(
+                    text,
+                    style: const TextStyle(
+                      color: ChromeTokens.textPrimary,
+                      fontSize: ChromeTokens.sizeBody,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -286,7 +288,11 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
         () => setState(() => _isInfoCardVisible = true),
       ),
       const Divider(height: 8),
-      _item('Save State (.molapp)', Icons.save_outlined, hasObjects ? _controller.saveState : null),
+      _item(
+        'Save State (.molapp)',
+        Icons.save_outlined,
+        hasObjects ? () => _controller.saveState(sharePositionOrigin: _sharePositionOrigin()) : null,
+      ),
       _item('Open State (.molapp)', Icons.folder_special_outlined, _controller.openState),
       const Divider(height: 8),
       SubmenuButton(
@@ -294,7 +300,9 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
         menuChildren: <Widget>[
           for (final format in ExportFormat.values)
             MenuItemButton(
-              onPressed: hasObjects ? () => _controller.exportImage(format) : null,
+              onPressed: hasObjects
+                  ? () => _controller.exportImage(format, sharePositionOrigin: _sharePositionOrigin())
+                  : null,
               child: Text(format.title),
             ),
         ],
@@ -304,6 +312,11 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
       const Divider(height: 8),
       _item('Reset All', Icons.restart_alt, _controller.resetAll, destructive: true),
     ]);
+  }
+
+  Rect _sharePositionOrigin() {
+    final box = context.findRenderObject()! as RenderBox;
+    return box.localToGlobal(Offset.zero) & box.size;
   }
 
   Widget _editMenu() {
@@ -761,20 +774,22 @@ class _MoleculeViewerPageState extends State<MoleculeViewerPage> {
   }
 
   Widget _colorDot(String objectName, String key, String? hex) {
-    return Tooltip(
-      message: key,
-      child: InkWell(
-        onTap: () {
-          _bridge.setObjectColor(name: objectName, colorHex: hex);
-          Navigator.of(context, rootNavigator: false).maybePop();
-        },
-        child: Container(
-          width: 26,
-          height: 26,
-          decoration: BoxDecoration(
-            color: colorFromHex(hex) ?? ChromeTokens.dotFallback,
-            shape: BoxShape.circle,
-            border: Border.all(color: ChromeTokens.dotBorder, width: 0.5),
+    return Builder(
+      builder: (context) => Tooltip(
+        message: key,
+        child: InkWell(
+          onTap: () {
+            _bridge.setObjectColor(name: objectName, colorHex: hex);
+            MenuController.maybeOf(context)?.close();
+          },
+          child: Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: colorFromHex(hex) ?? ChromeTokens.dotFallback,
+              shape: BoxShape.circle,
+              border: Border.all(color: ChromeTokens.dotBorder, width: 0.5),
+            ),
           ),
         ),
       ),

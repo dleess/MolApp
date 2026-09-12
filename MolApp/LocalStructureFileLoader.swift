@@ -15,6 +15,18 @@ enum LocalStructureFileLoader {
     }
 
     static func load(from url: URL) throws -> LocalStructureFile {
+        let fileFormat = try format(for: url)
+        let data = try readData(from: url)
+        // Lossy on purpose: Mol* also tolerates stray non-UTF-8 bytes in structure remarks.
+        return LocalStructureFile(
+            data: String(decoding: data, as: UTF8.self),
+            format: fileFormat,
+            label: url.lastPathComponent
+        )
+    }
+
+    // Structure and saved-state imports share the same scoped access and bridge payload limit.
+    static func readData(from url: URL) throws -> Data {
         let hasScopedAccess = url.startAccessingSecurityScopedResource()
         defer {
             if hasScopedAccess {
@@ -22,7 +34,6 @@ enum LocalStructureFileLoader {
             }
         }
 
-        let fileFormat = try format(for: url)
         // ponytail: the payload is copied ~5x downstream (JSON encode -> String -> script -> WKWebView
         // IPC), so a large file peaks at several times its size. Cap the input instead of moving the
         // read off-thread; raise the cap if a real structure gets rejected.
@@ -37,13 +48,7 @@ enum LocalStructureFileLoader {
         guard data.count <= maxFileSize else {
             throw LocalStructureFileLoaderError.tooLarge(data.count)
         }
-        // Lossy on purpose: Mol* decodes with a non-fatal TextDecoder, so rejecting a file for one
-        // stray Latin-1 byte in a REMARK would be stricter than the viewer that consumes it.
-        return LocalStructureFile(
-            data: String(decoding: data, as: UTF8.self),
-            format: fileFormat,
-            label: url.lastPathComponent
-        )
+        return data
     }
 
     static func format(for url: URL) throws -> String {

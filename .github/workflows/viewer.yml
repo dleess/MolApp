@@ -1,0 +1,33 @@
+name: viewer
+
+on:
+  push:
+    branches: [master]
+    paths: ['MolApp/**', 'MolAppTests/**', 'MolApp.xcodeproj/**', 'tests/**', '.github/workflows/viewer.yml']
+  pull_request:
+    paths: ['MolApp/**', 'MolAppTests/**', 'MolApp.xcodeproj/**', 'tests/**', '.github/workflows/viewer.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/viewer_*_test.cjs
+
+  swiftui:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the SwiftUI shell on an available iPad simulator
+        run: |
+          simulator_id=$(xcrun simctl list devices available -j | python3 -c 'import json, sys; print(next(d["udid"] for devices in json.load(sys.stdin)["devices"].values() for d in devices if d["name"].startswith("iPad")))')
+          xcodebuild -quiet -project MolApp.xcodeproj -scheme MolApp \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            test CODE_SIGNING_ALLOWED=NO

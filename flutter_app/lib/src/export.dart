@@ -1,8 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' show Rect;
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
@@ -90,24 +93,38 @@ Future<String?> deliverFile({
   required String suggestedName,
   required String mimeType,
   required String shareTitle,
+  Rect? sharePositionOrigin,
 }) async {
   if (platformHasSaveDialog) {
     final location = await getSaveLocation(suggestedName: suggestedName);
     if (location == null) return null;
-    await File(location.path).writeAsBytes(bytes, flush: true);
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      // NSSavePanel grants the selected file, not its parent directory for Dart staging.
+      await const MethodChannel('molapp/files').invokeMethod<void>(
+        'writeAtomically',
+        <String, Object>{'path': location.path, 'bytes': bytes},
+      );
+    } else {
+      final staging = await File(location.path).parent.createTemp('.molapp-save-');
+      final file = File('${staging.path}/${_basename(location.path)}');
+      await file.writeAsBytes(bytes, flush: true);
+      await file.rename(location.path);
+      await staging.delete(); // Empty after a successful rename; retain staged data on failure.
+    }
     return 'Saved ${_basename(location.path)}';
   }
 
   final directory = await getTemporaryDirectory();
   final path = '${directory.path}/$suggestedName';
   await File(path).writeAsBytes(bytes, flush: true);
-  await SharePlus.instance.share(
+  final result = await SharePlus.instance.share(
     ShareParams(
       files: <XFile>[XFile(path, mimeType: mimeType)],
       title: shareTitle,
+      sharePositionOrigin: sharePositionOrigin,
     ),
   );
-  return 'Shared $suggestedName';
+  return result.status == ShareResultStatus.dismissed ? null : 'Shared $suggestedName';
 }
 
 /// Sends the captured viewport to a printer through the platform print dialog.
