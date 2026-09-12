@@ -101,6 +101,7 @@ class MolStarJsRunner(Protocol):
 class MolStarBridge:
     def __init__(self) -> None:
         self._runner: MolStarJsRunner | None = None
+        self._attachment_id = 0
         self._listeners: list[Callable[[], None]] = []
         self._pending_scripts: list[str] = []
         self._command_ids = itertools.count()
@@ -161,13 +162,27 @@ class MolStarBridge:
         """Binds a freshly loaded page. Readiness is reset here rather than at the call sites: this
         is the one path every load and reload routes through, so the flag cannot outlive its page."""
         self._runner = runner
+        self._attachment_id += 1
         self.is_viewer_ready = False
         self.is_viewer_fatal = False
+        self.last_command_result = None
+        self.last_error_message = None
+        self.current_selection = None
+        self.objects = []
+        self.hover_label = None
+        self.hover_point = None
+        self.last_measurement = None
+        self.measure_pending_count = 0
+        self.measure_target_count = 2
+        self.measure_pending_labels = []
+        self.feature_visibility = {}
         self._notify()
 
     def detach(self) -> None:
         self._runner = None
+        self._attachment_id += 1
         self.is_viewer_ready = False
+        self._notify()
 
     def update_hover_point(self, point: tuple[float, float] | None) -> None:
         self.hover_point = point
@@ -286,25 +301,30 @@ class MolStarBridge:
     # the serial script queue and read the JS result directly.
 
     def serialize_state(self, on_done: Callable[[str | None], None]) -> None:
-        runner = self._runner
-        if runner is None:
-            on_done(None)
-            return
-        runner.call_async(
+        self._call_async_string(
             "return (window.molapp && window.molapp.serializeMolAppState)"
             " ? await window.molapp.serializeMolAppState() : null;",
-            lambda value, error: self._on_async_string(value, error, on_done),
+            on_done,
         )
 
     def capture_image_data_url(self, on_done: Callable[[str | None], None]) -> None:
+        self._call_async_string("return await window.molapp.captureImageDataURL();", on_done)
+
+    def _call_async_string(self, source: str, on_done: Callable[[str | None], None]) -> None:
         runner = self._runner
         if runner is None:
             on_done(None)
             return
-        runner.call_async(
-            "return await window.molapp.captureImageDataURL();",
-            lambda value, error: self._on_async_string(value, error, on_done),
-        )
+        attachment_id = self._attachment_id
+
+        def on_result(value: object | None, error: str | None) -> None:
+            # WebKit reloads use the same runner object, so its identity does not identify a page.
+            if attachment_id != self._attachment_id:
+                on_done(None)
+            else:
+                self._on_async_string(value, error, on_done)
+
+        runner.call_async(source, on_result)
 
     def _on_async_string(
         self, value: object | None, error: str | None, on_done: Callable[[str | None], None]
@@ -364,6 +384,7 @@ class MolStarBridge:
 
         if event == "viewerReady":
             self.is_viewer_ready = True
+            self.is_viewer_fatal = False
             self.last_error_message = None
             self._flush_pending_scripts()
             self._notify()

@@ -44,7 +44,7 @@ install -m 644 "$repo/MolApp/Resources/molstar/"* "$root/usr/share/molapp/web/mo
 # app needs no configuration to find its assets.
 cat > "$root/usr/bin/molapp" <<'LAUNCHER'
 #!/bin/sh
-PYTHONPATH="/usr/lib/molapp${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m molapp "$@"
+PYTHONPATH="/usr/lib/molapp${PYTHONPATH:+:$PYTHONPATH}" exec /usr/bin/python3 -m molapp "$@"
 LAUNCHER
 chmod 755 "$root/usr/bin/molapp"
 

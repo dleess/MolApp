@@ -150,7 +150,25 @@ class MolStarBridge extends ChangeNotifier {
     _runner = runner;
     _isViewerReady = false;
     _isViewerFatal = false;
+    _lastCommandResult = null;
+    _lastErrorMessage = null;
+    _currentSelection = null;
+    _objects = <MolAppObject>[];
+    _hoverLabel = null;
+    _hoverPoint = null;
+    _lastMeasurement = null;
+    _measurePendingCount = 0;
+    _measureTargetCount = 2;
+    _measurePendingLabels = const <String>[];
+    _featureVisibility = <String, bool>{};
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    detach();
+    _pendingScripts.clear();
+    super.dispose();
   }
 
   void detach() {
@@ -310,26 +328,36 @@ class MolStarBridge extends ChangeNotifier {
     if (runner == null) return null;
     try {
       final result = await runner.callAsync(source);
-      return result as String?;
+      return identical(_runner, runner) ? result as String? : null;
     } catch (error) {
-      reportError(error.toString());
+      if (identical(_runner, runner)) reportError(error.toString());
       return null;
     }
   }
 
   /// Stylus/mouse hover position, forwarded so Mol* can report what is under the cursor.
   Future<void> sendHover(double x, double y) async {
-    await _runner?.evaluate('window.molapp?.handlePencilHover?.($x, $y);');
+    await _evaluate('window.molapp?.handlePencilHover?.($x, $y);');
   }
 
   Future<void> sendHoverEnd() async {
-    await _runner?.evaluate('window.molapp?.handlePencilHoverEnd?.();');
+    await _evaluate('window.molapp?.handlePencilHoverEnd?.();');
   }
 
   /// Trackpad/mouse-wheel and pinch zoom, forwarded as a relative scale the way the iPad pinch
   /// recognizer did. Mol*'s own wheel handling covers the plain-scroll case.
   Future<void> sendPinch(double scale, double x, double y) async {
-    await _runner?.evaluate('window.molapp?.handleNativePinch?.($scale, $x, $y);');
+    await _evaluate('window.molapp?.handleNativePinch?.($scale, $x, $y);');
+  }
+
+  Future<void> _evaluate(String source) async {
+    final runner = _runner;
+    if (runner == null) return;
+    try {
+      await runner.evaluate(source);
+    } catch (error) {
+      if (identical(_runner, runner)) reportError(error.toString());
+    }
   }
 
   void _send(MolStarCommand command, Map<String, dynamic> payload) {
@@ -364,9 +392,7 @@ class MolStarBridge extends ChangeNotifier {
     final scripts = List<String>.of(_pendingScripts);
     _pendingScripts.clear();
     for (final script in scripts) {
-      runner.evaluate(script).catchError((Object error) {
-        reportError(error.toString());
-      });
+      _evaluate(script);
     }
   }
 

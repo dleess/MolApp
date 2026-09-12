@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from typing import Callable
 
 from .bridge import MolStarBridge, MolStarCommand, MolStarCommandResult
@@ -58,12 +59,15 @@ class ViewerController:
         self.is_morphing = False
         self.selected_representation = MoleculeRepresentation.ribbon
         self.visibility_states: dict[MoleculeVisibilityFeature, bool] = {
-            feature: True for feature in MoleculeVisibilityFeature
+            feature: bridge.feature_visibility.get(feature.name, True)
+            for feature in MoleculeVisibilityFeature
         }
+        self._seen_feature_visibility: dict[str, bool] | None = dict(bridge.feature_visibility)
 
         self._listeners: list[Callable[[], None]] = []
         self._seen_command_result: MolStarCommandResult | None = None
         self._seen_measurement_seq = 0
+        self._was_viewer_ready = bridge.is_viewer_ready
 
     # MARK: - Observation
 
@@ -117,6 +121,20 @@ class ViewerController:
 
     def _on_bridge_changed(self) -> None:
         changed = False
+        if (
+            self._was_viewer_ready and not self.bridge.is_viewer_ready
+        ) or self.bridge.is_viewer_fatal:
+            changed = (
+                self.measure_kind is not None or self.is_morphing
+                or self.selected_representation is not MoleculeRepresentation.ribbon
+                or self.status_message != IDLE_STATUS
+            )
+            self.measure_kind = None
+            self.is_morphing = False
+            self.selected_representation = MoleculeRepresentation.ribbon
+            self.status_message = IDLE_STATUS
+            self._seen_feature_visibility = None
+        self._was_viewer_ready = self.bridge.is_viewer_ready
 
         # Key off the counter, not the label: measuring the same pair again, or two pairs that
         # happen to render the same text, are still separate measurements to report.
@@ -133,14 +151,15 @@ class ViewerController:
             self._seen_command_result = result
             changed = self._apply_command_result(result) or changed
 
-        rebuilt = {feature: True for feature in MoleculeVisibilityFeature}
-        for raw, is_visible in self.bridge.feature_visibility.items():
-            feature = MoleculeVisibilityFeature.from_raw(raw)
-            if feature is not None:
-                rebuilt[feature] = is_visible
-        if rebuilt != self.visibility_states:
-            self.visibility_states = rebuilt
-            changed = True
+        if self.bridge.feature_visibility != self._seen_feature_visibility:
+            self._seen_feature_visibility = dict(self.bridge.feature_visibility)
+            rebuilt = {
+                feature: self.bridge.feature_visibility.get(feature.name, True)
+                for feature in MoleculeVisibilityFeature
+            }
+            if rebuilt != self.visibility_states:
+                self.visibility_states = rebuilt
+                changed = True
 
         # The bridge's own state (objects, selection, errors) changed too; the UI listens to both,
         # so only notify when this controller's state moved.
@@ -150,6 +169,8 @@ class ViewerController:
     def _apply_command_result(self, result: MolStarCommandResult) -> bool:
         if not result.success:
             changed = False
+            if result.command is MolStarCommand.toggleVisibility:
+                self._seen_feature_visibility = None
             # In-flight status is set optimistically and only advanced on success, so a rejected
             # command would otherwise claim "Loading …" forever next to the error banner.
             if self.status_message.endswith("…") or self.status_message.startswith("Loading"):
@@ -219,9 +240,9 @@ class ViewerController:
         self._notify()
 
     def toggle_visibility(self, feature: MoleculeVisibilityFeature) -> None:
+        self._begin_action()
         is_visible = not self.visibility_states.get(feature, True)
         self.visibility_states = {**self.visibility_states, feature: is_visible}
-        self._begin_action()
         self.status_message = f"{feature.title} {'shown' if is_visible else 'hidden'}"
         self.bridge.toggle_visibility(feature=feature.name, is_visible=is_visible)
         self._notify()
@@ -383,11 +404,18 @@ class ViewerController:
         if not path:
             self.update_status(IDLE_STATUS)
             return
+        temporary_path = None
         try:
-            with open(path, "wb") as handle:
+            # Publish only a complete write: a failed save must leave the previous file intact.
+            with tempfile.NamedTemporaryFile(
+                dir=os.path.dirname(os.path.abspath(path)), prefix=".molapp-", delete=False
+            ) as handle:
+                temporary_path = handle.name
                 handle.write(data)
+            os.replace(temporary_path, path)
         except OSError as error:
-            self._fail_action(str(error))
+            retained = f" (temporary file: {temporary_path})" if temporary_path else ""
+            self._fail_action(str(error) + retained)
             return
         self.update_status(f"Saved {os.path.basename(path)}")
 
@@ -439,7 +467,10 @@ class ViewerController:
         elif command in ("show", "hide"):
             if len(components) >= 2:
                 is_visible = command == "show"
-                feature = MoleculeVisibilityFeature.from_raw(components[1])
+                feature = (
+                    MoleculeVisibilityFeature.from_raw(components[1])
+                    if len(components) == 2 else None
+                )
                 if feature is not None:
                     if self.visibility_states.get(feature, True) != is_visible:
                         self.toggle_visibility(feature)

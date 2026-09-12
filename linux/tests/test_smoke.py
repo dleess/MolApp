@@ -18,6 +18,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 # Prefer whatever `molapp` is already importable — that is how the same suite can be run against
 # the installed .deb (PYTHONPATH=/usr/lib/molapp) rather than this checkout.
@@ -35,6 +36,7 @@ from gi.repository import Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
 
 from molapp.models import ExportFormat, MolAppObjectType, ObjectRepresentation  # noqa: E402
 from molapp.window import MolAppWindow  # noqa: E402
+from molapp.webview import viewer_html_path  # noqa: E402
 
 #: Two alanines with a full backbone: enough for Mol* to build a real structure (and a ribbon) with
 #: no network and no fixture file.
@@ -79,7 +81,14 @@ class ViewerBridgeSmokeTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.application = Gtk.Application(application_id="com.donghan.molapp.test")
         cls.application.register()
-        cls.window = MolAppWindow(cls.application)
+        assets = os.path.dirname(os.path.abspath(viewer_html_path()))
+        directory = tempfile.mkdtemp(prefix="molapp viewer # ")
+        link = os.path.join(directory, "web")
+        os.symlink(assets, link)
+        # Overrides may be relative and paths may contain URI delimiters: boot the real viewer
+        # through both so an unescaped file:// concatenation cannot pass this smoke check.
+        with patch.dict(os.environ, {"MOLAPP_WEB_ROOT": os.path.relpath(link)}):
+            cls.window = MolAppWindow(cls.application)
         cls.window.show_all()
         assert pump_until(lambda: cls.window.bridge.is_viewer_ready), (
             "the Mol* viewer never reported viewerReady: " f"{cls.window.bridge.last_error_message}"
@@ -191,6 +200,13 @@ class ViewerBridgeSmokeTests(unittest.TestCase):
         self.assertTrue(
             pump_until(lambda: not self.window.bridge.objects), "Reset All left objects behind"
         )
+
+    def test_09_failed_navigation_marks_the_viewer_unavailable(self) -> None:
+        missing = os.path.join(tempfile.mkdtemp(prefix="molapp-missing-viewer-"), "viewer.html")
+        self.window.viewport.widget.load_uri("file://" + missing)
+        self.assertTrue(pump_until(lambda: self.window.bridge.is_viewer_fatal))
+        self.assertFalse(self.window.bridge.is_viewer_ready)
+        self.assertIn("Viewer failed to load:", self.window.bridge.last_error_message or "")
 
 
 def _has_foreground(pixbuf: GdkPixbuf.Pixbuf) -> bool:

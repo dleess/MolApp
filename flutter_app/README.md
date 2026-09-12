@@ -1,8 +1,7 @@
 # MolApp (Flutter)
 
 The Mol\*-powered molecule viewer for **iOS, Android, macOS and Windows** from one codebase.
-This replaces the SwiftUI app in `../MolApp`, which stays in the repo as the reference
-implementation the port was checked against. Linux ships as the GTK shell in `../linux/`.
+The SwiftUI app in `../MolApp` still ships to the App Store. Linux ships as the GTK shell in `../linux/`.
 
 ## What is shared and what was rewritten
 
@@ -87,7 +86,7 @@ shell's `.deb`.
 
 ```sh
 flutter analyze
-flutter test                                                   # 103 unit + widget tests
+flutter test                                                   # unit + widget tests
 flutter test integration_test/viewer_bridge_test.dart -d macos  # real webview, real Mol*
 ```
 
@@ -104,14 +103,14 @@ target is wired end to end.
 | Android `applicationId` | `com.donghan.molapp` | same as the Compose app, so the Play listing carries over |
 | iOS bundle id | `com.donghan.MolApp` | matches the App Store app (case-sensitive) |
 | macOS bundle id | `com.donghan.molapp` | new target, no existing listing |
-| version | `1.0.4+1` (pubspec) | Android was at versionName 1.0.4 / versionCode 3, iOS at 1.0.3 / build 9 |
+| version | `pubspec.yaml` | `+N` supplies Android's versionCode |
 
 Android release signing reads `MOLAPP_STORE_FILE` / `MOLAPP_STORE_PASSWORD` / `MOLAPP_KEY_ALIAS` /
 `MOLAPP_KEY_PASSWORD` from `~/.gradle/gradle.properties`, the same upload keystore the Compose app
 used. Without them the release build falls back to debug keys so `flutter run --release` still works.
 
-**Before uploading to Play, bump `versionCode` past 3** — the Compose app already burned 1–3.
-`flutter build` derives it from pubspec's `+1`, so set `version: 1.0.4+4` or pass `--build-number=4`.
+**Before uploading to Play, use a versionCode greater than every previously uploaded build.**
+`flutter build` derives it from pubspec's `+N`, or accepts `--build-number`.
 
 ## Known gaps versus the native apps
 

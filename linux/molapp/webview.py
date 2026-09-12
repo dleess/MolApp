@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Callable
 
 import gi
@@ -127,7 +128,7 @@ class MolStarWebView:
 
     def load(self) -> None:
         self.bridge.attach(self)
-        self.widget.load_uri("file://" + viewer_html_path())
+        self.widget.load_uri(Path(viewer_html_path()).absolute().as_uri())
 
     # MARK: - MolStarJsRunner
 
@@ -168,7 +169,10 @@ class MolStarWebView:
         # A cancelled load is what a second load_uri looks like, not a failure to report.
         if error.matches(WebKit2.NetworkError.quark(), WebKit2.NetworkError.CANCELLED):
             return False
-        self.bridge.report_error(f"Viewer failed to load: {error.message}")
+        self.bridge.receive_message({
+            "event": "viewerError", "fatal": True,
+            "message": f"Viewer failed to load: {error.message}",
+        })
         return False
 
     def _on_web_process_terminated(self, _view, _reason) -> None:

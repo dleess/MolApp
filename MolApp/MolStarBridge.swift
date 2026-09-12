@@ -165,15 +165,25 @@ final class MolStarBridge: NSObject, ObservableObject {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var pendingScripts: [String] = []
-    private(set) var isViewerReady = false
+    @Published private(set) var isViewerReady = false
+    private var attachmentGeneration = 0
     // The viewer never came up at all (fatal init failure). Distinct from !isViewerReady, which is
     // the normal "still booting" state that pendingScripts exists to cover.
     private var isViewerFatal = false
 
     func attach(webView: WKWebView) {
+        attachmentGeneration += 1
         self.webView = webView
         isViewerReady = false
         isViewerFatal = false
+        objects = []
+        currentSelection = nil
+        featureVisibility = [:]
+        hoverLabel = nil
+        hoverPoint = nil
+        lastMeasurement = nil
+        lastCommandResult = nil
+        lastErrorMessage = nil
     }
 
     func updateHoverPoint(_ point: CGPoint?) {
@@ -281,28 +291,27 @@ final class MolStarBridge: NSObject, ObservableObject {
     // serial script queue and await the JS result directly.
     @MainActor
     func serializeState() async -> String? {
-        guard let webView else { return nil }
-        do {
-            let result = try await webView.callAsyncJavaScript(
-                "return (window.molapp && window.molapp.serializeMolAppState) ? await window.molapp.serializeMolAppState() : null;",
-                arguments: [:], in: nil, contentWorld: .page)
-            return result as? String
-        } catch {
-            lastErrorMessage = error.localizedDescription
-            return nil
-        }
+        await callAsyncString("return (window.molapp && window.molapp.serializeMolAppState) ? await window.molapp.serializeMolAppState() : null;")
     }
 
     @MainActor
     func captureImageDataURL() async -> String? {
+        await callAsyncString("return await window.molapp.captureImageDataURL();")
+    }
+
+    @MainActor
+    private func callAsyncString(_ script: String) async -> String? {
         guard let webView else { return nil }
+        let generation = attachmentGeneration
         do {
             let result = try await webView.callAsyncJavaScript(
-                "return await window.molapp.captureImageDataURL();",
-                arguments: [:], in: nil, contentWorld: .page)
+                script, arguments: [:], in: nil, contentWorld: .page)
+            guard generation == attachmentGeneration else { return nil }
             return result as? String
         } catch {
-            lastErrorMessage = error.localizedDescription
+            if generation == attachmentGeneration {
+                lastErrorMessage = error.localizedDescription
+            }
             return nil
         }
     }
@@ -340,9 +349,10 @@ final class MolStarBridge: NSObject, ObservableObject {
         guard isViewerReady, !pendingScripts.isEmpty, let webView else { return }
         let scripts = pendingScripts
         pendingScripts.removeAll()
+        let generation = attachmentGeneration
         for script in scripts {
             webView.evaluateJavaScript(script) { [weak self] _, error in
-                guard let self else { return }
+                guard let self, self.attachmentGeneration == generation else { return }
                 if let error {
                     self.lastErrorMessage = error.localizedDescription
                 }
@@ -359,6 +369,7 @@ final class MolStarBridge: NSObject, ObservableObject {
         let data = try JSONSerialization.data(withJSONObject: messageBody)
 
         if let dict = messageBody as? [String: Any], dict["event"] as? String == "viewerReady" {
+            isViewerFatal = false
             isViewerReady = true
             lastErrorMessage = nil
             flushPendingScripts()

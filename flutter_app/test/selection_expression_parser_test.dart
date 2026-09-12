@@ -56,6 +56,42 @@ void main() {
       expect(() => parse('chain'), throwsA(isA<SelectionParseException>()));
     });
 
+    test('rejects operators and parentheses in place of term values', () {
+      for (final term in ['chain', 'atom', 'res', 'residue', 'resn', 'model']) {
+        for (final value in ['&', '|', '!', '(', ')']) {
+          expect(
+            () => parse('$term $value'),
+            throwsA(isA<SelectionParseException>()),
+            reason: '$term $value',
+          );
+        }
+      }
+    });
+
+    test(
+      'rejects malformed residue and model numbers before building an AST',
+      () {
+        for (final expression in [
+          'res 12oops',
+          'residue 1.5',
+          'res A',
+          'res 1-',
+          'res 1-2-3',
+          'res 1-2oops',
+          'model 2oops',
+          'model 1.5',
+          'model A',
+          'model 1-2',
+        ]) {
+          expect(
+            () => parse(expression),
+            throwsA(isA<SelectionParseException>()),
+            reason: expression,
+          );
+        }
+      },
+    );
+
     test('reads res as a single residue', () {
       final ast = parse('res 42');
       expect(ast.kind, SelectionASTKind.residue);
@@ -92,6 +128,13 @@ void main() {
       final ast = parse('res -5-10');
       expect(ast.kind, SelectionASTKind.residueRange);
       expect(ast.value, '-5-10');
+      expect(parse('res -5--1').value, '-5--1');
+    });
+
+    test('preserves valid signed numbers and keyword-like chain IDs', () {
+      expect(parse('res +5').value, '+5');
+      expect(parse('model +2').value, '+2');
+      expect(parse('chain and').value, 'and');
     });
 
     test('handles the not text keyword', () {

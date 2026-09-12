@@ -68,46 +68,32 @@ struct SelectionExpressionParser {
             return node
         }
 
-        if token == "chain" {
-            index += 1
-            guard index < tokens.count else { throw ParserError.missingValue("chain") }
-            // Preserve case: chain IDs are case-sensitive (e.g. distinct A vs a in large assemblies).
-            let value = tokens[index]
-            index += 1
-            return SelectionAST(kind: .chain, left: nil, right: nil, operand: nil, value: value)
-        } else if token == "atom" {
-            index += 1
-            guard index < tokens.count else { throw ParserError.missingValue("atom") }
-            let value = tokens[index].uppercased()
-            index += 1
-            return SelectionAST(kind: .atom, left: nil, right: nil, operand: nil, value: value)
-        } else if token == "res" || token == "residue" {
-            index += 1
-            guard index < tokens.count else { throw ParserError.missingValue(token) }
-            let value = tokens[index]
-            index += 1
-            // A range needs an interior hyphen ("3-42"); a leading-only hyphen is a negative
-            // single residue ("-5"), not a range.
-            if value.dropFirst().contains("-") {
-                return SelectionAST(kind: .residueRange, left: nil, right: nil, operand: nil, value: value)
-            } else {
-                return SelectionAST(kind: .residue, left: nil, right: nil, operand: nil, value: value)
-            }
-        } else if token == "resn" {
-            index += 1
-            guard index < tokens.count else { throw ParserError.missingValue("resn") }
-            let value = tokens[index].uppercased()
-            index += 1
-            return SelectionAST(kind: .residueName, left: nil, right: nil, operand: nil, value: value)
-        } else if token == "model" {
-            index += 1
-            guard index < tokens.count else { throw ParserError.missingValue("model") }
-            let value = tokens[index]
-            index += 1
-            return SelectionAST(kind: .model, left: nil, right: nil, operand: nil, value: value)
+        var kind: SelectionAST.Kind
+        switch token {
+        case "chain": kind = .chain
+        case "atom": kind = .atom
+        case "res", "residue": kind = .residue
+        case "resn": kind = .residueName
+        case "model": kind = .model
+        default: throw ParserError.unexpectedToken(token)
         }
-
-        throw ParserError.unexpectedToken(token)
+        index += 1
+        guard index < tokens.count, !Self.symbols.contains(tokens[index]) else {
+            throw ParserError.missingValue(token)
+        }
+        var value = tokens[index]
+        index += 1
+        if kind == .residue || kind == .model {
+            if kind == .residue, value.range(of: #"^-?[0-9]+--?[0-9]+$"#, options: .regularExpression) != nil {
+                kind = .residueRange
+            } else if value.range(of: #"^[+-]?[0-9]+$"#, options: .regularExpression) == nil {
+                throw ParserError.invalidValue(token, value)
+            }
+        } else if kind == .atom || kind == .residueName {
+            value = value.uppercased()
+        }
+        // Preserve case for chain IDs, including keyword-like IDs such as "and".
+        return SelectionAST(kind: kind, left: nil, right: nil, operand: nil, value: value)
     }
 
     static let selectionKeywords: Set<String> = [
@@ -130,6 +116,7 @@ struct SelectionExpressionParser {
         case unexpectedEOF
         case missingClosingParen
         case missingValue(String)
+        case invalidValue(String, String)
 
         var errorDescription: String? {
             switch self {
@@ -137,6 +124,7 @@ struct SelectionExpressionParser {
             case .unexpectedEOF: "Unexpected end of expression"
             case .missingClosingParen: "Missing closing parenthesis"
             case .missingValue(let t): "Missing value for \(t)"
+            case .invalidValue(let t, let value): "Invalid value for \(t): \(value)"
             }
         }
     }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show Rect;
 
 import 'package:flutter/foundation.dart';
 
@@ -14,7 +15,7 @@ const String kIdleStatus = 'Ready for structure loading';
 /// command-bar text, and the command parser. Menus and the command bar share these methods so both
 /// behave identically — the same split the Kotlin `ViewerController` used.
 class ViewerController extends ChangeNotifier {
-  ViewerController(this.bridge) {
+  ViewerController(this.bridge) : _wasViewerReady = bridge.isViewerReady {
     bridge.addListener(_onBridgeChanged);
   }
 
@@ -32,6 +33,9 @@ class ViewerController extends ChangeNotifier {
     for (final feature in MoleculeVisibilityFeature.values) feature: true,
   };
 
+  bool _disposed = false;
+  bool _wasViewerReady;
+  Map<String, bool>? _seenFeatureVisibility = const <String, bool>{};
   MolStarCommandResult? _seenCommandResult;
   int _seenMeasurementSeq = 0;
 
@@ -41,16 +45,19 @@ class ViewerController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     bridge.removeListener(_onBridgeChanged);
     super.dispose();
   }
 
   void updateStatus(String message) {
+    if (_disposed) return;
     statusMessage = message;
     notifyListeners();
   }
 
   void updateError(String? message) {
+    if (_disposed) return;
     localErrorMessage = message;
     notifyListeners();
   }
@@ -87,6 +94,17 @@ class ViewerController extends ChangeNotifier {
 
   void _onBridgeChanged() {
     var changed = false;
+    if (bridge.isViewerFatal || (_wasViewerReady && !bridge.isViewerReady)) {
+      measureKind = null;
+      isMorphing = false;
+      selectedRepresentation = MoleculeRepresentation.ribbon;
+      visibilityStates = <MoleculeVisibilityFeature, bool>{
+        for (final feature in MoleculeVisibilityFeature.values) feature: true,
+      };
+      statusMessage = kIdleStatus;
+      changed = true;
+    }
+    _wasViewerReady = bridge.isViewerReady;
 
     // Key off the counter, not the label: measuring the same pair again, or two pairs that happen
     // to render the same text, are still separate measurements the status line must report.
@@ -106,16 +124,19 @@ class ViewerController extends ChangeNotifier {
     }
 
     final visibility = bridge.featureVisibility;
-    final rebuilt = <MoleculeVisibilityFeature, bool>{
-      for (final feature in MoleculeVisibilityFeature.values) feature: true,
-    };
-    for (final entry in visibility.entries) {
-      final feature = MoleculeVisibilityFeature.fromRaw(entry.key);
-      if (feature != null) rebuilt[feature] = entry.value;
-    }
-    if (!mapEquals(rebuilt, visibilityStates)) {
-      visibilityStates = rebuilt;
-      changed = true;
+    if (!mapEquals(visibility, _seenFeatureVisibility)) {
+      _seenFeatureVisibility = visibility;
+      final rebuilt = <MoleculeVisibilityFeature, bool>{
+        for (final feature in MoleculeVisibilityFeature.values) feature: true,
+      };
+      for (final entry in visibility.entries) {
+        final feature = MoleculeVisibilityFeature.fromRaw(entry.key);
+        if (feature != null) rebuilt[feature] = entry.value;
+      }
+      if (!mapEquals(rebuilt, visibilityStates)) {
+        visibilityStates = rebuilt;
+        changed = true;
+      }
     }
 
     // The bridge's own state (objects, selection, errors) changed too; the UI listens to both, so
@@ -125,6 +146,7 @@ class ViewerController extends ChangeNotifier {
 
   bool _applyCommandResult(MolStarCommandResult result) {
     if (!result.success) {
+      if (result.command == MolStarCommand.toggleVisibility) _seenFeatureVisibility = null;
       var changed = false;
       // In-flight status is set optimistically and only advanced on success, so a rejected command
       // would otherwise claim "Loading …" forever next to the error banner.
@@ -203,9 +225,9 @@ class ViewerController extends ChangeNotifier {
   }
 
   void toggleVisibility(MoleculeVisibilityFeature feature) {
+    _beginAction();
     final isVisible = !(visibilityStates[feature] ?? true);
     visibilityStates = <MoleculeVisibilityFeature, bool>{...visibilityStates, feature: isVisible};
-    _beginAction();
     statusMessage = '${feature.title} ${isVisible ? 'shown' : 'hidden'}';
     bridge.toggleVisibility(feature: feature.name, isVisible: isVisible);
     notifyListeners();
@@ -284,7 +306,7 @@ class ViewerController extends ChangeNotifier {
   Future<void> openStructure() async {
     try {
       final structure = await LocalStructureFileLoader.open();
-      if (structure == null) return;
+      if (_disposed || structure == null) return;
       statusMessage = 'Loading ${structure.label}';
       _beginAction();
       bridge.loadLocalStructure(
@@ -301,7 +323,7 @@ class ViewerController extends ChangeNotifier {
   Future<void> openState() async {
     try {
       final json = await LocalStructureFileLoader.openStateJson();
-      if (json == null) return;
+      if (_disposed || json == null) return;
       statusMessage = 'Loading state…';
       _beginAction();
       bridge.loadState(json);
@@ -311,7 +333,7 @@ class ViewerController extends ChangeNotifier {
     }
   }
 
-  Future<void> saveState() async {
+  Future<void> saveState({Rect? sharePositionOrigin}) async {
     _beginAction();
     if (bridge.objects.isEmpty) {
       updateError('Nothing to save yet.');
@@ -319,6 +341,7 @@ class ViewerController extends ChangeNotifier {
     }
     updateStatus('Capturing state…');
     final json = await bridge.serializeState();
+    if (_disposed) return;
     if (json == null || json.isEmpty) {
       _failAction('Could not capture current state.');
       return;
@@ -329,6 +352,7 @@ class ViewerController extends ChangeNotifier {
         suggestedName: 'molecule.molapp',
         mimeType: 'application/json',
         shareTitle: 'MolApp state',
+        sharePositionOrigin: sharePositionOrigin,
       );
       updateStatus(status ?? kIdleStatus);
     } catch (error) {
@@ -336,7 +360,7 @@ class ViewerController extends ChangeNotifier {
     }
   }
 
-  Future<void> exportImage(ExportFormat format) async {
+  Future<void> exportImage(ExportFormat format, {Rect? sharePositionOrigin}) async {
     _beginAction();
     if (bridge.objects.isEmpty) {
       updateError('Nothing to export yet.');
@@ -346,11 +370,14 @@ class ViewerController extends ChangeNotifier {
     final png = await _capturePng();
     if (png == null) return;
     try {
+      final bytes = await encodeExport(png, format);
+      if (_disposed) return;
       final status = await deliverFile(
-        bytes: await encodeExport(png, format),
+        bytes: bytes,
         suggestedName: 'molecule.${format.fileExtension}',
         mimeType: format.mimeType,
         shareTitle: 'MolApp ${format.title}',
+        sharePositionOrigin: sharePositionOrigin,
       );
       // A null status means the user dismissed the save dialog, so there is nothing to announce.
       // Claiming "Exported PNG" for a file that was never written is worse than saying nothing.
@@ -379,6 +406,7 @@ class ViewerController extends ChangeNotifier {
 
   Future<Uint8List?> _capturePng() async {
     final dataUrl = await bridge.captureImageDataURL();
+    if (_disposed) return null;
     final png = dataUrl == null ? null : bytesFromDataUrl(dataUrl);
     if (png == null) {
       _failAction('Could not capture the display.');
@@ -441,7 +469,9 @@ class ViewerController extends ChangeNotifier {
       case 'hide':
         if (components.length >= 2) {
           final isVisible = command == 'show';
-          final feature = MoleculeVisibilityFeature.fromRaw(components[1]);
+          final feature = components.length == 2
+              ? MoleculeVisibilityFeature.fromRaw(components[1])
+              : null;
           if (feature != null) {
             if ((visibilityStates[feature] ?? true) != isVisible) toggleVisibility(feature);
           } else {

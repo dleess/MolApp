@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -11,7 +12,7 @@ Future<void> main() async {
   // Android needs the WebView provider resolved before the first InAppWebView is built; the other
   // platforms use whatever engine ships with the OS.
   if (Platform.isAndroid) {
-    await InAppWebViewController.setWebContentsDebuggingEnabled(true);
+    await InAppWebViewController.setWebContentsDebuggingEnabled(kDebugMode);
   }
   runApp(const MolApp());
 }

@@ -26,6 +26,7 @@ struct MolStarWebView: UIViewRepresentable {
         webView.scrollView.backgroundColor = .clear
         webView.scrollView.bounces = false
         webView.scrollView.isScrollEnabled = false
+        webView.scrollView.pinchGestureRecognizer?.isEnabled = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.allowsBackForwardNavigationGestures = false
 
@@ -75,6 +76,7 @@ struct MolStarWebView: UIViewRepresentable {
             bridge.attach(webView: webView)
 
             guard let htmlURL = Bundle.main.url(forResource: htmlResourceName, withExtension: "html") else {
+                reportViewerFailure("Viewer resource not found.")
                 webView.loadHTMLString(
                     """
                     <!doctype html>
@@ -95,6 +97,24 @@ struct MolStarWebView: UIViewRepresentable {
             // rather than reload(): after a crash the last URL may be gone, and every command sent
             // meanwhile would be dropped against a dead page.
             loadViewerHTML(in: webView)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            reportNavigationFailure(error)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            reportNavigationFailure(error)
+        }
+
+        private func reportNavigationFailure(_ error: Error) {
+            let error = error as NSError
+            guard error.domain != NSURLErrorDomain || error.code != NSURLErrorCancelled else { return }
+            reportViewerFailure(error.localizedDescription)
+        }
+
+        private func reportViewerFailure(_ message: String) {
+            try? bridge.receive(messageBody: ["event": "viewerError", "fatal": true, "message": message])
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

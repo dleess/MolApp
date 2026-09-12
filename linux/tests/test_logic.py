@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 # Prefer whatever `molapp` is already importable — that is how the same suite can be run against
 # the installed .deb (PYTHONPATH=/usr/lib/molapp) rather than this checkout.
@@ -159,6 +160,9 @@ class BridgeTests(unittest.TestCase):
         bridge.load_pdb_id("1CRN")
         bridge.receive_message({"event": "viewerReady"})
         self.assertEqual(runner.scripts, [])
+        bridge.load_pdb_id("1UBQ")
+        self.assertFalse(bridge.is_viewer_fatal)
+        self.assertEqual(runner.last_command()["payload"], {"pdbId": "1UBQ"})
 
     def test_objects_replaced_rebuilds_the_panel(self) -> None:
         bridge, _ = ready_bridge()
@@ -224,6 +228,65 @@ class BridgeTests(unittest.TestCase):
         bridge.receive_message({"event": "measurement", "label": "A — B"})
         self.assertEqual(bridge.measurement_seq, 2)
 
+    def test_reloading_clears_the_previous_scene(self) -> None:
+        bridge, runner = ready_bridge()
+        controller = ViewerController(bridge)
+        bridge.receive_message({"event": "objectsReplaced", "objects": [
+            {"name": "old.pdb", "type": "structure"}], "visibility": {"water": False}})
+        bridge.receive_message({"event": "selectionChanged", "selection": {"type": "atom"}})
+        bridge.receive_message({"event": "pencilHover", "label": "CA"})
+        bridge.update_hover_point((10, 20))
+        bridge.receive_message({"event": "measurement", "label": "A — B"})
+        bridge.receive_message({"event": "measurePending", "count": 1, "target": 3, "labels": ["CA"]})
+        controller.toggle_measure(MeasureKind.angle)
+        controller.is_morphing = True
+        controller.set_representation(MoleculeRepresentation.surface)
+
+        bridge.attach(runner)
+
+        self.assertFalse(bridge.is_viewer_ready)
+        self.assertEqual(bridge.objects, [])
+        self.assertIsNone(bridge.current_selection)
+        self.assertIsNone(bridge.hover_label)
+        self.assertIsNone(bridge.hover_point)
+        self.assertIsNone(bridge.last_measurement)
+        self.assertEqual(bridge.measure_pending_count, 0)
+        self.assertEqual(bridge.measure_pending_labels, [])
+        self.assertEqual(bridge.feature_visibility, {})
+        self.assertIsNone(controller.measure_kind)
+        self.assertFalse(controller.is_morphing)
+        self.assertEqual(controller.selected_representation, MoleculeRepresentation.ribbon)
+
+    def test_old_page_captures_cannot_report_success_or_error_after_reload(self) -> None:
+        bridge, runner = ready_bridge()
+        pending = []
+        runner.call_async = lambda source, on_done: pending.append(on_done)
+        values = []
+        bridge.serialize_state(values.append)
+        bridge.capture_image_data_url(values.append)
+        bridge.attach(runner)
+        pending[0]("old state", None)
+        pending[1](None, "old page failed")
+        self.assertEqual(values, [None, None])
+        self.assertIsNone(bridge.last_error_message)
+
+    def test_startup_commands_survive_hover_before_the_viewer_is_ready(self) -> None:
+        bridge = MolStarBridge()
+        controller = ViewerController(bridge)
+        runner = FakeRunner()
+        bridge.attach(runner)
+        controller.toggle_measure(MeasureKind.angle)
+        controller.set_representation(MoleculeRepresentation.surface)
+        controller.toggle_visibility(MoleculeVisibilityFeature.water)
+        bridge.update_hover_point((10, 20))
+        self.assertEqual(runner.commands(), [])
+        bridge.receive_message({"event": "viewerReady"})
+        bridge.receive_message({"command": "setMeasureMode", "success": True})
+        self.assertEqual(controller.measure_kind, MeasureKind.angle)
+        self.assertEqual(controller.selected_representation, MoleculeRepresentation.surface)
+        self.assertFalse(controller.visibility_states[MoleculeVisibilityFeature.water])
+        self.assertEqual(runner.commands()[0]["payload"], {"enabled": True, "kind": "angle"})
+
 
 class SelectionParserTests(unittest.TestCase):
     def parse(self, expression: str) -> dict:
@@ -262,6 +325,15 @@ class SelectionParserTests(unittest.TestCase):
         for expression in ["chain", "(chain A", "chain A )", "bogus"]:
             with self.assertRaises(SelectionParseError):
                 self.parse(expression)
+
+    def test_term_values_reject_symbols_and_partial_numbers(self) -> None:
+        for expression in ["chain &", "atom )", "resn !", "res 12oops", "residue 1.5", "res 1-2oops", "model 2oops"]:
+            with self.subTest(expression=expression), self.assertRaises(SelectionParseError):
+                self.parse(expression)
+        self.assertEqual(self.parse("chain and"), {"kind": "chain", "value": "and"})
+        self.assertEqual(self.parse("res +5"), {"kind": "residue", "value": "+5"})
+        self.assertEqual(self.parse("res -5--1"), {"kind": "residueRange", "value": "-5--1"})
+
 
     def test_extract_name(self) -> None:
         self.assertEqual(
@@ -325,6 +397,16 @@ class CommandBarTests(unittest.TestCase):
         before = len(self.runner.commands())
         self.run_command("hide water")
         self.assertEqual(len(self.runner.commands()), before)
+
+    def test_feature_words_inside_object_names_do_not_toggle_the_feature(self) -> None:
+        for command, name, visible in [
+            ("hide", "protein model.pdb", False),
+            ("show", "water model.pdb", True),
+            ("hide", "ligand model.pdb", False),
+        ]:
+            self.run_command(f"{command} {name}")
+            self.assertEqual(self.runner.last_command()["command"], "setObjectVisibility")
+            self.assertEqual(self.runner.last_command()["payload"], {"name": name, "isVisible": visible})
 
     def test_color_rejects_an_unknown_name_and_a_short_hex(self) -> None:
         self.run_command("color gren 1CRN")
@@ -415,6 +497,17 @@ class ControllerStateTests(unittest.TestCase):
         )
         self.assertFalse(self.controller.visibility_states[MoleculeVisibilityFeature.water])
 
+    def test_hiding_a_feature_survives_error_clearing_and_hover_events(self) -> None:
+        self.bridge.report_error("previous command failed")
+        self.controller.toggle_visibility(MoleculeVisibilityFeature.water)
+        self.bridge.update_hover_point((10, 20))
+        self.assertFalse(self.controller.visibility_states[MoleculeVisibilityFeature.water])
+        self.assertEqual(self.runner.last_command()["payload"], {"feature": "water", "isVisible": False})
+        self.bridge.receive_message(
+            {"id": "1", "command": "toggleVisibility", "success": False, "error": "not ready"}
+        )
+        self.assertTrue(self.controller.visibility_states[MoleculeVisibilityFeature.water])
+
     def test_superpose_needs_two_visible_structures(self) -> None:
         self.controller.superpose()
         self.assertEqual(
@@ -458,6 +551,21 @@ class ControllerStateTests(unittest.TestCase):
             self.controller.export_image(ExportFormat.png, lambda _name: path)
             self.assertTrue(os.path.getsize(path) > 0)
         self.assertEqual(self.controller.status_message, "Saved molecule.png")
+
+    def test_a_failed_save_preserves_the_previous_file(self) -> None:
+        self.bridge.receive_message(
+            {"event": "objectsReplaced", "objects": [{"name": "1CRN", "type": "structure"}]}
+        )
+        self.runner.async_result = '{"new": "state"}'
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "molecule.molapp")
+            with open(path, "wb") as handle:
+                handle.write(b"previous state")
+            with patch("molapp.controller.os.replace", side_effect=OSError("destination failed")):
+                self.controller.save_state(lambda _name: path)
+            with open(path, "rb") as handle:
+                self.assertEqual(handle.read(), b"previous state")
+            self.assertIn("destination failed", self.controller.error_message or "")
 
     def test_a_capture_failure_is_reported(self) -> None:
         self.bridge.receive_message(

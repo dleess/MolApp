@@ -124,6 +124,16 @@ struct MoleculeViewerView: View {
         .sheet(isPresented: $isManualPresented) {
             ManualView()
         }
+        .onReceive(bridge.$isViewerReady.removeDuplicates()) { isReady in
+            if !isReady {
+                measureKind = nil
+                isMorphing = false
+                selectedRepresentation = .ribbon
+                statusMessage = "Loading viewer…"
+            } else if statusMessage == "Loading viewer…" {
+                statusMessage = "Ready for structure loading"
+            }
+        }
         .onReceive(bridge.$lastMeasurement) { label in
             guard let label else { return }
             statusMessage = "\(measureKind?.title ?? "Distance"): \(label)"
@@ -497,6 +507,7 @@ struct MoleculeViewerView: View {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.white.opacity(0.6))
                 }
+                .accessibilityLabel("Clear command")
             }
 
             Button {
@@ -563,7 +574,7 @@ struct MoleculeViewerView: View {
             }
         case "show", "hide":
             if components.count >= 2 {
-                let arg = components[1]
+                let arg = components.dropFirst().joined(separator: " ")
                 let isVisible = (command == "show")
                 if let feature = MoleculeVisibilityFeature(rawValue: arg) {
                     if visibilityStates[feature] != isVisible {
@@ -685,20 +696,7 @@ struct MoleculeViewerView: View {
     private func handleStateImport(_ result: Result<[URL], Error>) {
         do {
             guard let url = try result.get().first else { return }
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            // Saved state embeds the structure text, so it is the same size class as a raw file and
-            // needs the same cap — see LocalStructureFileLoader.load.
-            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            guard size <= LocalStructureFileLoader.maxFileSize else {
-                throw LocalStructureFileLoaderError.tooLarge(size)
-            }
-            let data = try Data(contentsOf: url)
-            // fileSizeKey is nil for some providers → the pre-check passes with size 0; re-check the
-            // bytes actually read (see LocalStructureFileLoader.load).
-            guard data.count <= LocalStructureFileLoader.maxFileSize else {
-                throw LocalStructureFileLoaderError.tooLarge(data.count)
-            }
+            let data = try LocalStructureFileLoader.readData(from: url)
             guard let json = String(data: data, encoding: .utf8) else {
                 localErrorMessage = "Could not read .molapp file."
                 return
@@ -877,6 +875,7 @@ struct MoleculeViewerView: View {
                         .foregroundStyle(object.isVisible ? .white : .white.opacity(0.35))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("\(object.isVisible ? "Hide" : "Show") \(object.name)")
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(object.name)
@@ -890,17 +889,22 @@ struct MoleculeViewerView: View {
 
                 Spacer()
 
-                Circle()
-                    .fill(object.swiftUIColor)
-                    .frame(width: 14, height: 14)
-                    .overlay(Circle().stroke(.white.opacity(0.3), lineWidth: 0.5))
-                    .onTapGesture { colorPickerTarget = object.name }
-                    .popover(isPresented: Binding(
-                        get: { colorPickerTarget == object.name },
-                        set: { if !$0 { colorPickerTarget = nil } }
-                    )) {
-                        colorPickerPopover(for: object.name)
-                    }
+                Button {
+                    colorPickerTarget = object.name
+                } label: {
+                    Circle()
+                        .fill(object.swiftUIColor)
+                        .frame(width: 14, height: 14)
+                        .overlay(Circle().stroke(.white.opacity(0.3), lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Color for \(object.name)")
+                .popover(isPresented: Binding(
+                    get: { colorPickerTarget == object.name },
+                    set: { if !$0 { colorPickerTarget = nil } }
+                )) {
+                    colorPickerPopover(for: object.name)
+                }
             }
 
             HStack(spacing: 4) {
@@ -909,6 +913,7 @@ struct MoleculeViewerView: View {
                         bridge.setObjectRepresentation(name: object.name, representation: repr)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("\(repr.title) for \(object.name)")
                     .font(.system(size: 10, weight: .medium))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 3)
@@ -951,6 +956,7 @@ struct MoleculeViewerView: View {
                             .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(item.label)
                 }
             }
         }

@@ -5,6 +5,27 @@ import WebKit
 final class MolStarBridgeTests: XCTestCase {
     private var viewerAuditRunner: ViewerAuditRunner?
 
+    func testManualShowsTheInstalledAppVersion() throws {
+        let version = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+        XCTAssertEqual(AppInfo.version, version)
+    }
+
+    func testLocalStructureLoaderPreservesTextAndRejectsOversizedFiles() throws {
+        let url = try XCTUnwrap(writeTemporaryFile(named: "example.PDB", data: Data([65, 255, 10])))
+        let structure = try LocalStructureFileLoader.load(from: url)
+        XCTAssertEqual(structure.data, "A\u{FFFD}\n")
+        XCTAssertEqual(structure.format, "pdb")
+        XCTAssertEqual(structure.label, "example.PDB")
+
+        let oversized = LocalStructureFileLoader.maxFileSize + 1
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: UInt64(oversized))
+        try handle.close()
+        XCTAssertThrowsError(try LocalStructureFileLoader.load(from: url)) { error in
+            XCTAssertEqual(error as? LocalStructureFileLoaderError, .tooLarge(oversized))
+        }
+    }
+
     func testViewerAppliesRepresentationsOnlyToSelectionInWebView() throws {
         guard let htmlURL = Bundle.main.url(forResource: "viewer", withExtension: "html") else {
             XCTFail("viewer.html is missing from the host app bundle")
@@ -118,6 +139,112 @@ final class MolStarBridgeTests: XCTestCase {
         ])
         XCTAssertFalse(bridge.isViewerReady)
         XCTAssertEqual(bridge.lastErrorMessage, "Fatal")
+    }
+
+    @MainActor
+    func testReattachingWebViewClearsStateFromThePreviousViewer() throws {
+        let bridge = MolStarBridge()
+        let webView = WKWebView()
+        bridge.attach(webView: webView)
+        try bridge.receive(messageBody: ["event": "viewerReady"])
+        bridge.addObject(MolAppObject(name: "1UBQ", type: .structure))
+        try bridge.receive(messageBody: ["event": "selectionChanged", "selection": ["type": "atom", "label": "CA"]])
+        try bridge.receive(messageBody: ["event": "featureVisibility", "feature": "water", "isVisible": false])
+        try bridge.receive(messageBody: ["event": "measurement", "label": "CA — N"])
+        bridge.updateHoverPoint(CGPoint(x: 20, y: 30))
+        try bridge.receive(messageBody: ["event": "pencilHover", "label": "CA"])
+        try bridge.receive(messageBody: ["id": "old", "command": "startMorph", "success": true])
+        try bridge.receive(messageBody: ["event": "viewerError", "message": "Old page error"])
+
+        bridge.attach(webView: webView)
+
+        XCTAssertFalse(bridge.isViewerReady)
+        XCTAssertTrue(bridge.objects.isEmpty)
+        XCTAssertTrue(bridge.featureVisibility.isEmpty)
+        XCTAssertNil(bridge.currentSelection)
+        XCTAssertNil(bridge.hoverLabel)
+        XCTAssertNil(bridge.hoverPoint)
+        XCTAssertNil(bridge.lastMeasurement)
+        XCTAssertNil(bridge.lastCommandResult)
+        XCTAssertNil(bridge.lastErrorMessage)
+    }
+
+    @MainActor
+    func testMissingViewerResourceReportsFatalFailure() {
+        let bridge = MolStarBridge()
+        let coordinator = MolStarWebView.Coordinator(bridge: bridge, htmlResourceName: "missing-viewer")
+        let webView = WKWebView()
+
+        coordinator.loadViewerHTML(in: webView)
+
+        XCTAssertFalse(bridge.isViewerReady)
+        XCTAssertEqual(bridge.lastErrorMessage, "Viewer resource not found.")
+    }
+
+    @MainActor
+    func testNavigationFailuresReportFatalViewerFailure() throws {
+        let bridge = MolStarBridge()
+        let coordinator = MolStarWebView.Coordinator(bridge: bridge, htmlResourceName: "viewer")
+        let webView = WKWebView()
+        bridge.attach(webView: webView)
+        try bridge.receive(messageBody: ["event": "viewerReady"])
+        let failure = NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotOpenFile)
+
+        (coordinator as WKNavigationDelegate).webView?(webView, didFailProvisionalNavigation: nil, withError: failure)
+        XCTAssertFalse(bridge.isViewerReady)
+        XCTAssertEqual(bridge.lastErrorMessage, failure.localizedDescription)
+
+        bridge.attach(webView: webView)
+        try bridge.receive(messageBody: ["event": "viewerReady"])
+        (coordinator as WKNavigationDelegate).webView?(webView, didFail: nil, withError: failure)
+        XCTAssertFalse(bridge.isViewerReady)
+        XCTAssertEqual(bridge.lastErrorMessage, failure.localizedDescription)
+    }
+
+    @MainActor
+    func testCancelledNavigationDoesNotInvalidateTheCurrentViewer() throws {
+        let bridge = MolStarBridge()
+        let coordinator = MolStarWebView.Coordinator(bridge: bridge, htmlResourceName: "viewer")
+        let webView = WKWebView()
+        bridge.attach(webView: webView)
+        try bridge.receive(messageBody: ["event": "viewerReady"])
+        let cancellation = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+
+        coordinator.webView(webView, didFailProvisionalNavigation: nil, withError: cancellation)
+        coordinator.webView(webView, didFail: nil, withError: cancellation)
+
+        XCTAssertTrue(bridge.isViewerReady)
+        XCTAssertNil(bridge.lastErrorMessage)
+    }
+
+    @MainActor
+    func testViewerReadyRecoversFromAnEarlierFatalInitializationEvent() throws {
+        let bridge = MolStarBridge()
+        let webView = RecordingWebView()
+        bridge.attach(webView: webView)
+        try bridge.receive(messageBody: ["event": "viewerError", "fatal": true, "message": "Initialization error"])
+        try bridge.receive(messageBody: ["event": "viewerReady"])
+
+        bridge.clearSelection()
+
+        XCTAssertEqual(webView.scripts.count, 1)
+        XCTAssertNil(bridge.lastErrorMessage)
+    }
+
+    @MainActor
+    func testOldPageCommandFailureCannotOverwriteReloadedViewerState() throws {
+        let bridge = MolStarBridge()
+        let webView = RecordingWebView()
+        bridge.attach(webView: webView)
+        try bridge.receive(messageBody: ["event": "viewerReady"])
+        bridge.clearSelection()
+        let completion = try XCTUnwrap(webView.completions.first)
+
+        bridge.attach(webView: webView)
+        try bridge.receive(messageBody: ["event": "viewerReady"])
+        completion?(nil, NSError(domain: WKError.errorDomain, code: WKError.webContentProcessTerminated.rawValue))
+
+        XCTAssertNil(bridge.lastErrorMessage)
     }
 
     func testBridgeAccumulatesAndResetsFeatureVisibility() throws {
@@ -363,6 +490,27 @@ final class MolStarBridgeTests: XCTestCase {
         XCTAssertEqual(ast.value, "2")
     }
 
+    func testSelectionExpressionParserRejectsIncompleteValues() {
+        for expression in ["chain &", "atom )", "resn !", "res 12oops", "residue 1.5", "res 1-2-3", "model 2oops"] {
+            var parser = SelectionExpressionParser(expression: expression)
+            XCTAssertThrowsError(try parser.parse(), expression)
+        }
+    }
+
+    func testSelectionExpressionParserPreservesSignedNumbersAndKeywordChainIDs() throws {
+        for (expression, kind, value) in [
+            ("res +5", SelectionAST.Kind.residue, "+5"),
+            ("res -5--1", .residueRange, "-5--1"),
+            ("model +2", .model, "+2"),
+            ("chain and", .chain, "and")
+        ] {
+            var parser = SelectionExpressionParser(expression: expression)
+            let ast = try parser.parse()
+            XCTAssertEqual(ast.kind, kind)
+            XCTAssertEqual(ast.value, value)
+        }
+    }
+
     func testSelectionExpressionParserHandlesAndTextKeyword() throws {
         var parser = SelectionExpressionParser(expression: "chain a and res 10")
         let ast = try parser.parse()
@@ -442,6 +590,16 @@ final class MolStarBridgeTests: XCTestCase {
         let bridge = MolStarBridge()
         bridge.addObject(MolAppObject(name: "mysel", type: .selection))
         XCTAssertEqual(bridge.objects[0].type, .selection)
+    }
+}
+
+private final class RecordingWebView: WKWebView {
+    var scripts: [String] = []
+    var completions: [(@MainActor @Sendable (Any?, Error?) -> Void)?] = []
+
+    override func evaluateJavaScript(_ javaScriptString: String, completionHandler: (@MainActor @Sendable (Any?, Error?) -> Void)? = nil) {
+        scripts.append(javaScriptString)
+        completions.append(completionHandler)
     }
 }
 
@@ -696,7 +854,7 @@ private final class ViewerAuditRunner: NSObject, WKNavigationDelegate {
         const duplicateLoadStructureCount = window.molapp.viewer.plugin.managers.structure.hierarchy.current.structures.length;
         window.__molappAuditProgress = 'checking failed command history';
         await cmd('setRepresentation', { representation: 'surface' });
-        await cmd('undo', {});
+        await cmd('undo', {}, 'history-undo');
         await cmd('setRepresentation', { representation: 'bogus' }, 'bogus-representation');
         const redoCountAfterFailedCommand = window.molapp.redoStack.length;
         window.__molappAuditProgress = 'checking reset';
@@ -776,7 +934,7 @@ private final class ViewerAuditRunner: NSObject, WKNavigationDelegate {
     }
 
     private func waitForCommandResults(then result: ViewerAuditResult, attempt: Int = 0) {
-        let ids = ["initial-load", "missing-selection", "duplicate-load", "bogus-representation", "active-selection", "reset-all"]
+        let ids = ["initial-load", "missing-selection", "duplicate-load", "history-undo", "bogus-representation", "active-selection", "reset-all"]
         let hasPreReadyResult = messageHandler.results.values.contains { $0.command == .clearSelection }
         guard ids.allSatisfy({ messageHandler.results[$0] != nil }), hasPreReadyResult else {
             guard attempt < 200 else {
@@ -821,6 +979,9 @@ private final class ViewerAuditRunner: NSObject, WKNavigationDelegate {
               bogus.error == "Unknown representation: bogus" else {
             throw ViewerAuditError.javascript("invalid representation did not report the expected failure")
         }
+        guard messageHandler.results["history-undo"]?.success == true else {
+            throw ViewerAuditError.javascript("undo before invalid command failed: \(messageHandler.results["history-undo"]?.error ?? "missing result")")
+        }
         guard messageHandler.results["active-selection"]?.success == true,
               messageHandler.results["reset-all"]?.success == true else {
             throw ViewerAuditError.javascript("reset precondition or reset command failed")
@@ -859,10 +1020,38 @@ private final class ViewerAuditRunner: NSObject, WKNavigationDelegate {
                 guard rendered as? Bool == true else {
                     throw ViewerAuditError.javascript("serialized representation did not match the rendered scene")
                 }
+                try await verifyReadsCannotOutliveTheirPage()
                 finish(.success(result))
             } catch {
                 finish(.failure(error))
             }
+        }
+    }
+
+    @MainActor
+    private func verifyReadsCannotOutliveTheirPage() async throws {
+        _ = try await webView.evaluateJavaScript("""
+        window.molapp.serializeMolAppState = () => new Promise(resolve => { window.__resolveOldState = resolve; });
+        window.molapp.captureImageDataURL = () => new Promise((resolve, reject) => { window.__rejectOldImage = reject; });
+        void 0;
+        """)
+        let stateRead = Task { await bridge.serializeState() }
+        let imageRead = Task { await bridge.captureImageDataURL() }
+        _ = try await webView.callAsyncJavaScript("""
+        while (!window.__resolveOldState || !window.__rejectOldImage) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        """, arguments: [:], in: nil, contentWorld: .page)
+        bridge.attach(webView: webView)
+        _ = try await webView.evaluateJavaScript("""
+        window.__resolveOldState('outdated scene');
+        window.__rejectOldImage(new Error('old page failure'));
+        void 0;
+        """)
+        let state = await stateRead.value
+        let image = await imageRead.value
+        guard state == nil, image == nil, bridge.lastErrorMessage == nil else {
+            throw ViewerAuditError.javascript("an old page read survived viewer reattachment")
         }
     }
 }

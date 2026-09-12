@@ -13,7 +13,7 @@ class SelectionParseException implements Exception {
 ///
 ///     chain A & res 3-42 | !resn HOH
 ///
-/// A direct port of the Swift/Kotlin parsers — the three must stay in step because they all produce
+/// A direct port of the Swift/Linux parsers — the three must stay in step because they all produce
 /// the same AST for `queryFromAST` in viewer.html.
 class SelectionExpressionParser {
   SelectionExpressionParser(String expression) : _tokens = _tokenize(expression);
@@ -113,54 +113,46 @@ class SelectionExpressionParser {
     }
 
     if (token == 'chain') {
-      _index += 1;
-      if (_index >= _tokens.length) {
-        throw const SelectionParseException('Missing value for chain');
-      }
       // Preserve case: chain IDs are case-sensitive (e.g. distinct A vs a in large assemblies).
-      final value = _tokens[_index];
-      _index += 1;
-      return SelectionAST(kind: SelectionASTKind.chain, value: value);
+      return SelectionAST(
+        kind: SelectionASTKind.chain,
+        value: _valueFor(token),
+      );
     } else if (token == 'atom') {
-      _index += 1;
-      if (_index >= _tokens.length) {
-        throw const SelectionParseException('Missing value for atom');
+      return SelectionAST(
+        kind: SelectionASTKind.atom,
+        value: _valueFor(token).toUpperCase(),
+      );
+    } else if (token == 'res' || token == 'residue' || token == 'model') {
+      final value = _valueFor(token);
+      if (RegExp(r'^[+-]?[0-9]+$').hasMatch(value)) {
+        return SelectionAST(
+          kind: token == 'model'
+              ? SelectionASTKind.model
+              : SelectionASTKind.residue,
+          value: value,
+        );
       }
-      final value = _tokens[_index].toUpperCase();
-      _index += 1;
-      return SelectionAST(kind: SelectionASTKind.atom, value: value);
-    } else if (token == 'res' || token == 'residue') {
-      _index += 1;
-      if (_index >= _tokens.length) {
-        throw SelectionParseException('Missing value for $token');
-      }
-      final value = _tokens[_index];
-      _index += 1;
-      // A range needs an interior hyphen ("3-42"); a leading-only hyphen is a negative single
-      // residue ("-5"), not a range.
-      if (value.length > 1 && value.substring(1).contains('-')) {
+      if (token != 'model' && RegExp(r'^-?[0-9]+--?[0-9]+$').hasMatch(value)) {
         return SelectionAST(kind: SelectionASTKind.residueRange, value: value);
       }
-      return SelectionAST(kind: SelectionASTKind.residue, value: value);
+      throw SelectionParseException('Invalid value for $token: $value');
     } else if (token == 'resn') {
-      _index += 1;
-      if (_index >= _tokens.length) {
-        throw const SelectionParseException('Missing value for resn');
-      }
-      final value = _tokens[_index].toUpperCase();
-      _index += 1;
-      return SelectionAST(kind: SelectionASTKind.residueName, value: value);
-    } else if (token == 'model') {
-      _index += 1;
-      if (_index >= _tokens.length) {
-        throw const SelectionParseException('Missing value for model');
-      }
-      final value = _tokens[_index];
-      _index += 1;
-      return SelectionAST(kind: SelectionASTKind.model, value: value);
+      return SelectionAST(
+        kind: SelectionASTKind.residueName,
+        value: _valueFor(token).toUpperCase(),
+      );
     }
 
     throw SelectionParseException('Unexpected token: $token');
+  }
+
+  String _valueFor(String keyword) {
+    _index += 1;
+    if (_index >= _tokens.length || symbols.contains(_tokens[_index])) {
+      throw SelectionParseException('Missing value for $keyword');
+    }
+    return _tokens[_index++];
   }
 
   /// Splits `select sele chain A` into the object name and the expression. A leading token that is

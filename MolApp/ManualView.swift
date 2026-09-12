@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum AppInfo {
-    static let version = "1.0.1"
+    static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
 }
 
 struct ManualView: View {
