@@ -12,9 +12,10 @@ There are three shells in this repo over one shared web core:
 
 **`flutter_app/` is the one to work in for the mobile and desktop targets it covers.** See
 [`flutter_app/README.md`](flutter_app/README.md) for setup, per-platform requirements and known
-gaps. The SwiftUI shell is the reference implementation the Flutter port was checked against and
-still ships to the App Store. The former Jetpack Compose shell (`android/`) and the Flutter Linux
-target were removed; they live on at the git tags `native-android-ref` and `flutter-linux-ref`.
+gaps. The SwiftUI shell is the reference implementation the Flutter port was checked against.
+Flutter ships to both the App Store and Google Play. The former Jetpack Compose shell (`android/`)
+and the Flutter Linux target were removed; they live on at the git tags `native-android-ref` and
+`flutter-linux-ref`.
 
 **Linux is served by `linux/`, not by Flutter.** `flutter_inappwebview_linux` renders through WPE
 WebKit 2.40+, which no current Ubuntu ships at all, so the Flutter Linux target was dropped. The GTK shell runs the same

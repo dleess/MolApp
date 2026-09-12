@@ -1,7 +1,7 @@
 # MolApp (Flutter)
 
 The Mol\*-powered molecule viewer for **iOS, Android, macOS and Windows** from one codebase.
-The SwiftUI app in `../MolApp` still ships to the App Store. Linux ships as the GTK shell in `../linux/`.
+This Flutter app ships to the App Store and Google Play. Linux ships as the GTK shell in `../linux/`.
 
 ## What is shared and what was rewritten
 
