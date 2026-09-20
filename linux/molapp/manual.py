@@ -169,6 +169,10 @@ def show_manual(parent: Gtk.Window) -> None:
                 commands.add(_paragraph(command.detail, dim=True, small=True))
             content.add(commands)
 
+    support = Gtk.LinkButton.new_with_label("https://buymeacoffee.com/donghanlee", "Buy me a coffee")
+    support.set_halign(Gtk.Align.START)
+    content.add(support)
+
     version = Gtk.Label(label=f"MolApp version {APP_VERSION}")
     version.get_style_context().add_class("manual-version")
     content.add(version)
