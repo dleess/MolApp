@@ -1,5 +1,7 @@
 # MolApp
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/donghanlee)
+
 Mol\*-powered molecule viewer.
 
 There are three shells in this repo over one shared web core:
@@ -64,3 +66,7 @@ xcodebuild -project MolApp.xcodeproj -scheme MolApp -destination 'platform=iOS S
 Still planned:
 
 - Screenshot annotation and sharing for communicating marked-up structure views.
+
+## Support
+
+MolApp is free. If it helps your work, you can [buy me a coffee](https://buymeacoffee.com/donghanlee).
