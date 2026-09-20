@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class _ManualCommand {
   const _ManualCommand(this.syntax, this.detail);
@@ -122,6 +124,14 @@ const List<_ManualSection> _sections = <_ManualSection>[
   ),
 ];
 
+/// Store builds (iOS / Android) must not link to an external tip page — App Store 3.1.1 and the
+/// Play payments policy treat developer tips as in-app purchases. Desktop builds ship outside
+/// the stores, so the link is fine there.
+bool get _showSupportLink =>
+    defaultTargetPlatform != TargetPlatform.iOS && defaultTargetPlatform != TargetPlatform.android;
+
+final Uri _supportUri = Uri.parse('https://buymeacoffee.com/donghanlee');
+
 class ManualPage extends StatelessWidget {
   const ManualPage({super.key});
 
@@ -196,6 +206,15 @@ class ManualPage extends StatelessWidget {
             ],
             const SizedBox(height: 22),
           ],
+          if (_showSupportLink)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: () => launchUrl(_supportUri),
+                icon: const Icon(Icons.coffee_outlined),
+                label: const Text('Buy me a coffee'),
+              ),
+            ),
         ],
       ),
     );
