@@ -80,7 +80,7 @@ function viewer() {
       structure: {
         StructureElement: { Location: { create: () => ({}) } },
         StructureProperties: {
-          atom: { label_atom_id: () => 'CA',
+          atom: { label_atom_id: () => 'CA', type_symbol: l => l.unit.symbols?.[l.element] || 'C',
             x: l => l.unit.points[l.element][0], y: l => l.unit.points[l.element][1],
             z: l => l.unit.points[l.element][2] },
           chain: { auth_asym_id: () => 'A' },
@@ -156,6 +156,23 @@ test('Kabsch recovers rigid rotations and translations', () => {
     const reference = points.map(([x, y, z]) => [c * x - s * y + 7, s * x + c * y - 4, z + 3]);
     assert.ok(core.rmsdAfterTransform(points, reference, core.kabschTransform(points, reference)) < 1e-10);
   }
+});
+
+test('superposition excludes calcium ions named CA from the C-alpha core', async () => {
+  const { core, app, addStructure } = viewer();
+  const reference = addStructure('reference'), mobile = addStructure('mobile', 10);
+  for (const structure of [reference, mobile]) {
+    const unit = structure.cell.obj.data.units[0];
+    unit.elements.push(4);
+    unit.points.push([structure === mobile ? 12.5 : 2, 2, 2]);
+    unit.symbols = ['C', 'C', 'C', 'C', 'CA'];
+  }
+  await core.commandHandlers.superpose({ targets: ['reference', 'mobile'] });
+  assert.equal(app.superposeCore, 4);
+  assert.ok(app.superposeRmsd < 1e-10, 'calcium positions must not distort the protein alignment');
+
+  reference.cell.obj.data.units[0].symbols.fill('CA');
+  await assert.rejects(core.commandHandlers.superpose({ targets: ['reference', 'mobile'] }), /no Cα/);
 });
 
 test('non-looping morph uses a finite animation mode', async () => {

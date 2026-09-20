@@ -41,14 +41,21 @@ a silently broken viewer.
 
 ### macOS / iOS: Swift Package Manager must be off
 
+Use Flutter **3.47.5**, the version pinned in CI. It includes the
+[Xcode 27 framework architecture verification fix](https://github.com/flutter/flutter/pull/188625)
+needed for universal macOS release builds.
+
 ```sh
 flutter config --no-enable-swift-package-manager
 ```
 
 `flutter_inappwebview_macos` declares a macOS 10.14 SPM platform, and its
 `ASWebAuthenticationPresentationContextProviding` conformance does not compile at that deployment
-target against a current SDK. CocoaPods builds it at the app's own 10.15 target instead, which is
-fine. This is a per-machine Flutter setting, not something the repo can carry — CI sets it too.
+target against a current SDK. CocoaPods builds it at the app's own target instead.
+The macOS app requires **macOS 12.0 or later**: Xcode 27 rejects older deployment targets, so
+the project and Podfile set a 12.0 minimum, including dependency frameworks and privacy bundles.
+The iOS app requires **iOS 15.0 or later**, the minimum supported by this Flutter SDK.
+Disabling SPM is a per-machine Flutter setting — CI sets it too.
 
 ### Windows: NuGet on PATH
 

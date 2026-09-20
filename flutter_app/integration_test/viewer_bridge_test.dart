@@ -126,6 +126,38 @@ void main() {
     );
   });
 
+  testWidgets('calcium ions do not enter the protein superposition core', (tester) async {
+    final bridge = _InspectBridge();
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: MolStarWebView(bridge: bridge))));
+    expect(await pumpUntil(tester, () => bridge.isViewerReady), isTrue);
+
+    const pdb = '''
+ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C
+ATOM      2  CA  ALA A   2       1.000   1.000   0.000  1.00  0.00           C
+ATOM      3  CA  ALA A   3       2.000   0.000   1.000  1.00  0.00           C
+ATOM      4  CA  ALA A   4       0.000   2.000   3.000  1.00  0.00           C
+HETATM    5 CA    CA B   5       2.000   2.000   2.000  1.00  0.00          CA
+END
+''';
+    final result = await bridge.runner.callAsync('''
+      const reference = ${jsonEncode(pdb)};
+      const mobile = reference.split('\\n').map(line => {
+        if (!/^(ATOM  |HETATM)/.test(line)) return line;
+        const x = Number(line.slice(30, 38)) + 10 + (line.startsWith('HETATM') ? 0.5 : 0);
+        return line.slice(0, 30) + x.toFixed(3).padStart(8) + line.slice(38);
+      }).join('\\n');
+      for (const [label, data] of [['reference', reference], ['mobile', mobile]]) {
+        await window.molapp.handleNativeCommand({command: 'loadLocalStructure', payload: {label, data, format: 'pdb'}});
+      }
+      await window.molapp.handleNativeCommand({command: 'superpose', payload: {targets: ['reference', 'mobile']}});
+      return JSON.stringify({core: window.molapp.superposeCore, rmsd: window.molapp.superposeRmsd});
+    ''');
+    final alignment = jsonDecode(result! as String) as Map<String, dynamic>;
+    expect(alignment['core'], 4);
+    expect(alignment['rmsd'], closeTo(0, 1e-6));
+    expect(bridge.lastErrorMessage, isNull);
+  });
+
   testWidgets('two complexes keep independent ligands after edits and state restore', (tester) async {
     final bridge = _InspectBridge();
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: MolStarWebView(bridge: bridge))));

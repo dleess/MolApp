@@ -1,64 +1,58 @@
-# HANDOFF: Store release 1.1.6 (16)
+# HANDOFF: Store release 1.1.7 (17)
 
-Updated 2026-09-12. The Flutter app ships to both Google Play and the App Store;
-SwiftUI remains the reference shell. Previous release history and the full Android renderer-crash
-investigation are preserved in this file at commit `05d3e60`.
+Updated 2026-09-20. Flutter ships to both stores; SwiftUI remains the reference shell.
+Release 1.1.6 history is preserved at commit `3b3f72b`; the earlier renderer-crash investigation
+is preserved at `05d3e60`.
 
 ## Release state
 
-- Refactor and fixes: [PR #44](https://github.com/dleess/MolApp/pull/44) merged as
-  `05d3e60c80118da40ada17806a51f88c0e7cd31b`; all eight CI checks passed.
-- Google Play: **1.1.6 (16), production, submitted for review** at 09:49 UTC on 2026-09-12.
-  Publishing overview confirmed **Changes in review** and **1 change sent for review**.
-  Full rollout to existing targeted countries; managed publishing remains off.
-  Account: `lee.donghan@gmail.com`, developer `5578432782521884610`, app `4972032364118467410`,
+- App Store: **1.1.7 (17), WAITING_FOR_REVIEW**, submitted on 2026-09-20.
+  Build **VALID**; automatic release **AFTER_APPROVAL**. App `6786979305` (MolViewApp),
+  bundle `com.donghan.MolApp`. Build ID `55f5debc-bf47-48ee-8f8b-d1e806f8f6c8`;
+  version ID `d128e39e-cd85-453a-a934-26386a044b4e`;
+  review ID `4991ad44-6eb4-4c5c-898e-0ea03c1721dd`.
+- Google Play: **1.1.7 (17), production, Changes in review**, submitted on 2026-09-20.
+  Quick checks run before review; publishing remains automatic (managed publishing off).
+  Full rollout to all 177 currently targeted countries.
+  Account `lee.donghan@gmail.com`, developer `5578432782521884610`, app `4972032364118467410`,
   package `com.donghan.molapp`. Never use the kbsi.bionmr account.
-- App Store: **1.1.6 (16), submitted for review** at 09:51 UTC on 2026-09-12.
-  Independent API reads verified version and review submission **WAITING_FOR_REVIEW**,
-  with build 16 **VALID**. Review ID `a256f5c0-306b-4cdd-adde-004eb799149f`.
-  App `6786979305` (MolViewApp), bundle `com.donghan.MolApp`.
-  Build ID `924b308a-9d8f-45d3-85e1-1190c0f2ae0b`; version ID
-  `8278fdb0-8d7a-4696-92da-5aee5a599773`. Existing release policy is `AFTER_APPROVAL`.
-- The previous published versions were Play 1.1.5 (15) and App Store 1.1.3 (13).
-  Build 13's matching local archive contains Flutter.framework; do not switch the store back to
-  the native SwiftUI shell based on the older documentation.
+- At the start of this release, version 1.1.6 was live on both stores; this was verified from
+  App Store Connect (`READY_FOR_SALE`) and Play (`Available on Google Play`, full rollout).
 
 ## Release contents and validation
 
-PR #44 repairs multi-structure ligand ownership, selection and object-state persistence, colors
-and size themes, morph/superposition restoration, measurement sequencing, bridge lifecycle and
-error recovery, expression parsing, full object-name commands, and atomic desktop file export.
-It also improves narrow-screen controls and disables Android WebView debugging in release builds.
+Protein superposition now excludes calcium ions named CA from the C-alpha fit by requiring
+carbon elements. Node and real Mol* WebView regression tests cover the incorrect core/RMSD.
+Flutter 3.47.5 fixes Xcode 27 universal-framework architecture verification. The macOS project
+and CocoaPods dependencies use a 12.0 minimum; Flutter's iOS migration raises its minimum to 15.0.
 
-Before packaging: Flutter analyze clean; 142 Flutter unit/widget tests, 35 shared viewer Node tests,
-50 Linux logic tests plus one packaging test, 50 SwiftUI tests, and three native macOS export tests
-passed. Real macOS WebView integration passed 2 viewer and 17 measurement tests. CI additionally
-verified Android, Windows, Apple and the Linux package; all eight checks passed on PR #44.
+Validation: 36 Node tests, 142 Flutter unit/widget tests, 20 real macOS WebView integration tests,
+3 native macOS export tests, 50 Linux logic tests, and 50 SwiftUI tests passed. Flutter analysis
+is clean. Normal universal macOS debug/release builds work without xcconfig overrides. Both
+signed mobile packages contain the exact shared viewer SHA-256:
+`cf63d3ed9aa04a3b5e0e0d7bed57f0408b7d51e6ffb5eb85503f644493fa0cc8`.
 
-Release artifacts are signed, version 1.1.6 (16), and contain the final tested viewer core:
-`aa953ff1501474cc0f481cd2d5d97b1c996b7b12c9ac25debcc7d175f7c28c38` (SHA-256).
-
-- Android: `/tmp/molapp-full-refactor-20260912/flutter_app/build/app/outputs/bundle/release/app-release.aab`
-  (55,065,245 bytes), SHA-256 `6b5ce61a53d1664735cd95a8811dcf04f17b64a50743808380bde6a0ca092708`.
-  Package/version manifest checked, target SDK 36, minimum 26, non-debuggable;
-  signed JAR verified and certificate matches the configured upload keystore.
-- iOS: `/tmp/molapp-ios-release-20260912/flutter_app/build/ios/ipa/molapp.ipa`
-  (25,173,615 bytes), SHA-256 `e4297e7a266bbbf3100006f87345f78b92ee363039f6e3189269e666e77cfdc7`.
-  Distribution signing verified, iPhone/iPad, minimum iOS 13.0, Flutter framework present.
-- Nonsecret local evidence: `/tmp/molapp-android-release-artifact-20260912.json`,
-  `/tmp/molapp-ios-release-artifact-20260912.json`, `/tmp/molapp-play-submission-20260912.json`,
-  `/tmp/molapp-asc-build16-processed.json`, `/tmp/molapp-ios-submission-20260912.json`.
+- Android: `flutter_app/build/app/outputs/bundle/release/app-release.aab` (55,628,905 bytes).
+  SHA-256 `b70e89b8192dbdc3c6358b33ba0af29ab4b6159b69318e86c1c44b786f8ea1a5`.
+  Package/version verified from bundle manifest: 1.1.7 (17), target SDK 36, minimum SDK 26,
+  non-debuggable. JAR signature verified and certificate matches the configured upload key.
+- iOS: `flutter_app/build/ios/ipa/molapp.ipa` (25,386,975 bytes).
+  SHA-256 `1723734f8dbec01c70dd5cc6c6a5acd1899800a5f461076c15cfa1510f9ecbcc`.
+  Version 1.1.7 (17), minimum iOS 15.0, Apple Distribution signature, App Store provisioning,
+  Flutter framework and matching viewer verified inside the exported IPA.
+- Local evidence: `/tmp/molapp-android-release-artifact-20260920.json`,
+  `/tmp/molapp-ios-release-artifact-20260920.json`, `/tmp/molapp-ios-submission-20260920.json`,
+  `/tmp/molapp-play-submission-20260920.txt`.
 
 Release notes (en-US):
 
-> Improved reliability when loading and editing multiple structures. Fixed selections,
-> measurements, saved sessions, and file export. Updated viewer controls and error recovery.
+> Fixed protein superposition for structures containing calcium ions. Improved app reliability
+> and compatibility with current operating systems.
 
 ## Remaining observations
 
 - Review approval and public availability are separate from successful submission; check the
-  stores for the latest status before declaring the update live. Do not rebuild or reuse build 16.
-- Apple upload warning 90068 is nonblocking for this release: minimum iOS must be 15.0 by spring 2027.
+  stores for the latest status before declaring the update live. Do not reuse uploaded build 17.
 - Physical iPad Pencil hover, Samsung Flip behavior, and full Windows gesture/file-dialog behavior
   still need hardware QA; CI packaging/startup checks do not prove those interactions.
 - The earlier Android keyboard-crash investigation proved renderer-death recovery, while keyboard
@@ -71,6 +65,8 @@ Release notes (en-US):
 
 ## Workspace safety
 
-Source changes were isolated in `/tmp/molapp-full-refactor-20260912` and iOS packaging in
-`/tmp/molapp-ios-release-20260912`. The original checkout's pre-existing bridge edits and
-`.kkirikkiri/`, `.serena/`, and `promo/` were preserved. Never destructively delete release artifacts.
+Original `.kkirikkiri/`, `.serena/`, and `promo/` remain untracked and untouched. Pre-existing
+bridge edits were already present in upstream PR #44; their exact originals remain in the
+`molapp-debug-20260920 preserved pre-existing async bridge changes` stash and a temporary backup.
+Previous local iOS archive/IPA and Android bundle directories were archived with a
+`-before-1.1.7-20260920` suffix before packaging. Never destructively delete release artifacts.
