@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  FLUTTER_VERSION: '3.44.6'
+  FLUTTER_VERSION: '3.47.5'
 
 defaults:
   run:
@@ -93,7 +93,7 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
       # The macOS/iOS plugin implementations still declare a 10.14 SPM platform, which fails to
-      # compile against a current SDK. CocoaPods honours the app's own 10.15 target instead.
+      # compile against a current SDK. CocoaPods enforces the app's macOS 12.0 minimum instead.
       - run: flutter config --no-enable-swift-package-manager
       - run: flutter pub get
       - run: dart run tool/sync_web_assets.dart

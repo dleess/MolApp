@@ -1256,7 +1256,8 @@
           const els = unit.elements;
           for (let i = 0, n = els.length; i < n; i++) {
             loc.element = els[i];
-            if (SP.atom.label_atom_id(loc) !== 'CA') continue;
+            // Calcium ions can also be named CA; only carbon atoms belong in the Cα fit.
+            if (SP.atom.label_atom_id(loc) !== 'CA' || SP.atom.type_symbol(loc) !== 'C') continue;
             rows.push({
               chain: SP.chain.auth_asym_id(loc),
               seq: SP.residue.auth_seq_id(loc),
